@@ -57,7 +57,8 @@ class DocumentVectorizer:
         self,
         directory_path: str,
         batch_size: int = 10,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        force_revectorize: bool = False
     ) -> Dict[str, Any]:
         """
         指定されたディレクトリ内のドキュメントをベクトル化
@@ -88,8 +89,12 @@ class DocumentVectorizer:
         total_files = len(documents)
         processed_files = 0
         skipped_files = 0
+        skipped_no_content = 0
+        skipped_not_updated = 0
+        skipped_no_chunks = 0
         failed_files = 0
         total_chunks = 0
+        skipped_file_details = []  # スキップされたファイルの詳細
         
         # ファイルごとに処理
         for doc_idx, doc in enumerate(documents):
@@ -101,13 +106,20 @@ class DocumentVectorizer:
                         message=f"処理中: {doc['file_path']}"
                     )
                 
+                file_path = doc.get("file_path")
+                
                 # コンテンツが空の場合はスキップ
                 if not doc.get("content") or not doc["content"].strip():
+                    skipped_no_content += 1
+                    skipped_files += 1
+                    skipped_file_details.append({
+                        "file_path": file_path,
+                        "reason": "コンテンツが空"
+                    })
                     continue
                 
-                # ファイルの更新日時をチェック
-                file_path = doc.get("file_path")
-                if file_path:
+                # ファイルの更新日時をチェック（force_revectorizeがFalseの場合のみ）
+                if not force_revectorize and file_path:
                     current_modified_time = get_file_modified_time(file_path)
                     stored_modified_time = doc.get("file_modified_time")
                     
@@ -115,7 +127,12 @@ class DocumentVectorizer:
                     if current_modified_time is not None and stored_modified_time is not None:
                         # 浮動小数点数の比較（1秒以内の誤差は許容）
                         if abs(current_modified_time - stored_modified_time) < 1.0:
+                            skipped_not_updated += 1
                             skipped_files += 1
+                            skipped_file_details.append({
+                                "file_path": file_path,
+                                "reason": "更新日時が変更されていない"
+                            })
                             continue
                 
                 # ファイルの更新日時を取得（チャンクのメタデータに含めるため）
@@ -132,6 +149,12 @@ class DocumentVectorizer:
                 )
                 
                 if not chunks:
+                    skipped_no_chunks += 1
+                    skipped_files += 1
+                    skipped_file_details.append({
+                        "file_path": file_path,
+                        "reason": "チャンクが生成されなかった"
+                    })
                     continue
                 
                 # 各チャンクにfile_modified_timeを追加
@@ -178,9 +201,13 @@ class DocumentVectorizer:
             "message": "ベクトル化が完了しました",
             "processed_files": processed_files,
             "skipped_files": skipped_files,
+            "skipped_no_content": skipped_no_content,
+            "skipped_not_updated": skipped_not_updated,
+            "skipped_no_chunks": skipped_no_chunks,
             "failed_files": failed_files,
             "total_files": total_files,
-            "total_chunks": total_chunks
+            "total_chunks": total_chunks,
+            "skipped_file_details": skipped_file_details[:50]  # 最初の50件のみ返す（ログが大きくなりすぎないように）
         }
     
     def vectorize_file(

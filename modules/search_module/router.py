@@ -96,6 +96,7 @@ class VectorizeRequest(BaseModel):
     api_base: Optional[str] = Field(default=None, description="LiteLLMのカスタムエンドポイントURL（litellmプロバイダーの場合のみ）")
     chunk_size: int = Field(default=512, description="チャンクサイズ（トークン数）")
     chunk_overlap: int = Field(default=50, description="オーバーラップサイズ（トークン数）")
+    force_revectorize: bool = Field(default=False, description="強制再ベクトル化（更新日時チェックをスキップ）")
 
 
 class VectorizeResponse(BaseModel):
@@ -871,6 +872,11 @@ async def task_index():
                 <p>監視対象ディレクトリを設定し、変更を自動的にインデックスに反映します。</p>
                 <a href="/task/target_index_lists">監視対象ディレクトリ管理ページへ</a>
             </div>
+            <div class="task-card">
+                <h2>RAG質問応答</h2>
+                <p>知識ベースに対して質問をして、AIが回答を生成します。</p>
+                <a href="/task/rag">RAG質問応答ページへ</a>
+            </div>
         </div>
     </body>
     </html>
@@ -1328,6 +1334,9 @@ async def target_index_lists_page():
             
             status_badge = '<span style="color: #28a745; font-weight: bold;">有効</span>' if enabled else '<span style="color: #dc3545; font-weight: bold;">無効</span>'
             
+            # ディレクトリパスをエスケープ（JavaScript用）
+            directory_path_escaped = directory_path.replace("'", "\\'").replace("\\", "\\\\")
+            
             dirs_html += f"""
             <tr>
                 <td class="directory-path">{directory_path}</td>
@@ -1336,8 +1345,9 @@ async def target_index_lists_page():
                 <td class="last-scan">{last_scan_at}</td>
                 <td class="scan-duration">{last_scan_duration}</td>
                 <td class="actions">
+                    <button onclick="vectorizeDirectory('{directory_path_escaped}')" class="btn-vectorize">ベクトル化</button>
                     <button onclick="toggleEnabled({dir_id}, {not enabled})" class="btn-toggle">{'無効化' if enabled else '有効化'}</button>
-                    <button onclick="editDirectory({dir_id}, '{directory_path}', {scan_interval})" class="btn-edit">編集</button>
+                    <button onclick="editDirectory({dir_id}, '{directory_path_escaped}', {scan_interval})" class="btn-edit">編集</button>
                     <button onclick="deleteDirectory({dir_id})" class="btn-delete">削除</button>
                 </td>
             </tr>
@@ -1482,6 +1492,10 @@ async def target_index_lists_page():
                 }}
                 .btn-delete {{
                     background-color: #dc3545;
+                    color: white;
+                }}
+                .btn-vectorize {{
+                    background-color: #28a745;
                     color: white;
                 }}
                 .no-data {{
@@ -1701,6 +1715,45 @@ async def target_index_lists_page():
                         alert('エラーが発生しました: ' + error.message);
                     }}
                 }}
+                
+                async function vectorizeDirectory(directoryPath) {{
+                    // 強制再ベクトル化の確認
+                    const forceRevectorize = confirm(
+                        `ディレクトリ「${{directoryPath}}」をベクトル化しますか？\\n\\n` +
+                        `「OK」: 強制再ベクトル化（全ファイルを再処理）\\n` +
+                        `「キャンセル」: 通常ベクトル化（更新がないファイルはスキップ）`
+                    );
+                    
+                    if (!forceRevectorize && !confirm(`通常ベクトル化を実行しますか？\\n更新がないファイルは自動的にスキップされます。`)) {{
+                        return;
+                    }}
+                    
+                    try {{
+                        const response = await fetch('/search/vectorize', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                directory_path: directoryPath,
+                                chunk_size: 512,
+                                chunk_overlap: 50,
+                                force_revectorize: forceRevectorize
+                            }})
+                        }});
+                        
+                        if (response.ok) {{
+                            const result = await response.json();
+                            const mode = forceRevectorize ? '強制再ベクトル化' : '通常ベクトル化';
+                            alert(`ベクトル化ジョブを開始しました（${{mode}}）。\\nジョブID: ${{result.job_id}}\\n\\n進捗は「ベクトル化ページ」で確認できます。`);
+                            // ベクトル化ページにリダイレクト
+                            window.location.href = '/task/create_vector';
+                        }} else {{
+                            const errorText = await response.text();
+                            alert('エラーが発生しました: ' + errorText);
+                        }}
+                    }} catch (error) {{
+                        alert('エラーが発生しました: ' + error.message);
+                    }}
+                }}
             </script>
         </body>
         </html>
@@ -1723,6 +1776,384 @@ async def target_index_lists_page():
         </html>
         """
         return HTMLResponse(content=error_html, status_code=500)
+
+
+@task_router.get("/rag", response_class=HTMLResponse)
+async def rag_page():
+    """
+    RAG質問応答ページ
+    
+    Returns:
+        HTMLページ
+    """
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>RAG質問応答 - Obsidian MCP Server</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                padding: 30px;
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+            }
+            .back-link {
+                display: inline-block;
+                margin-bottom: 20px;
+                color: #007bff;
+                text-decoration: none;
+                font-size: 14px;
+            }
+            .back-link:hover {
+                text-decoration: underline;
+            }
+            .query-form {
+                margin-bottom: 30px;
+                padding: 20px;
+                background-color: #f8f9fa;
+                border-radius: 8px;
+            }
+            .form-group {
+                margin-bottom: 15px;
+            }
+            .form-group label {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: 600;
+                color: #333;
+            }
+            .form-group input,
+            .form-group textarea,
+            .form-group select {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                font-size: 14px;
+                font-family: inherit;
+            }
+            .form-group textarea {
+                min-height: 100px;
+                resize: vertical;
+            }
+            .form-group input[type="number"],
+            .form-group input[type="range"] {
+                width: 150px;
+            }
+            .form-group input[type="checkbox"] {
+                width: auto;
+                margin-right: 5px;
+            }
+            .form-row {
+                display: flex;
+                gap: 15px;
+                flex-wrap: wrap;
+            }
+            .form-row .form-group {
+                flex: 1;
+                min-width: 200px;
+            }
+            .btn {
+                padding: 12px 24px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 600;
+                transition: background-color 0.2s;
+            }
+            .btn-primary {
+                background-color: #007bff;
+                color: white;
+            }
+            .btn-primary:hover {
+                background-color: #0056b3;
+            }
+            .btn-primary:disabled {
+                background-color: #6c757d;
+                cursor: not-allowed;
+            }
+            .result-container {
+                margin-top: 30px;
+                display: none;
+            }
+            .result-container.show {
+                display: block;
+            }
+            .answer-section {
+                background-color: #e7f3ff;
+                border-left: 4px solid #007bff;
+                padding: 20px;
+                border-radius: 4px;
+                margin-bottom: 20px;
+            }
+            .answer-section h2 {
+                margin-top: 0;
+                color: #007bff;
+                font-size: 18px;
+            }
+            .answer-content {
+                white-space: pre-wrap;
+                line-height: 1.6;
+                color: #333;
+            }
+            .sources-section {
+                margin-top: 20px;
+            }
+            .sources-section h3 {
+                color: #333;
+                font-size: 16px;
+                margin-bottom: 15px;
+            }
+            .source-item {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 15px;
+                margin-bottom: 10px;
+            }
+            .source-item-header {
+                font-weight: 600;
+                color: #007bff;
+                margin-bottom: 8px;
+                font-size: 14px;
+            }
+            .source-item-path {
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                color: #666;
+                margin-bottom: 5px;
+            }
+            .source-item-snippet {
+                font-size: 13px;
+                color: #333;
+                line-height: 1.5;
+                margin-top: 8px;
+                padding: 10px;
+                background-color: white;
+                border-radius: 4px;
+            }
+            .loading {
+                text-align: center;
+                padding: 40px;
+                color: #666;
+            }
+            .loading-spinner {
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #007bff;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            .error {
+                background-color: #f8d7da;
+                border-left: 4px solid #dc3545;
+                color: #721c24;
+                padding: 15px;
+                border-radius: 4px;
+                margin-top: 20px;
+            }
+            .model-info {
+                font-size: 12px;
+                color: #666;
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid #dee2e6;
+            }
+            .advanced-options {
+                margin-top: 15px;
+                padding: 15px;
+                background-color: white;
+                border-radius: 4px;
+                border: 1px solid #dee2e6;
+            }
+            .advanced-options summary {
+                cursor: pointer;
+                font-weight: 600;
+                color: #007bff;
+                margin-bottom: 10px;
+            }
+            .advanced-options summary:hover {
+                color: #0056b3;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <a href="/task/" class="back-link">← タスク管理に戻る</a>
+            <h1>RAG質問応答</h1>
+            
+            <form id="ragForm" class="query-form" onsubmit="submitRAGQuery(event)">
+                <div class="form-group">
+                    <label for="query">質問:</label>
+                    <textarea id="query" name="query" required placeholder="知識ベースに対して質問を入力してください..."></textarea>
+                </div>
+                
+                <details class="advanced-options">
+                    <summary>詳細設定</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="limit">検索結果数:</label>
+                            <input type="number" id="limit" name="limit" value="20" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label for="hybrid_weight">ベクトル検索の重み:</label>
+                            <input type="range" id="hybrid_weight" name="hybrid_weight" min="0" max="1" step="0.1" value="0.5">
+                            <span id="hybrid_weight_value">0.5</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="temperature">温度パラメータ:</label>
+                            <input type="range" id="temperature" name="temperature" min="0" max="2" step="0.1" value="0.7">
+                            <span id="temperature_value">0.7</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="expand_synonyms" name="expand_synonyms">
+                                類義語展開を使用
+                            </label>
+                        </div>
+                    </div>
+                </details>
+                
+                <button type="submit" class="btn btn-primary" id="submitBtn">質問を送信</button>
+            </form>
+            
+            <div id="loading" class="loading" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p>回答を生成中...</p>
+            </div>
+            
+            <div id="resultContainer" class="result-container">
+                <div class="answer-section">
+                    <h2>回答</h2>
+                    <div id="answerContent" class="answer-content"></div>
+                    <div id="modelInfo" class="model-info"></div>
+                </div>
+                
+                <div class="sources-section">
+                    <h3>参照元</h3>
+                    <div id="sourcesList"></div>
+                </div>
+            </div>
+            
+            <div id="errorContainer" class="error" style="display: none;"></div>
+        </div>
+        
+        <script>
+            // スライダーの値を表示
+            document.getElementById('hybrid_weight').addEventListener('input', function(e) {
+                document.getElementById('hybrid_weight_value').textContent = e.target.value;
+            });
+            
+            document.getElementById('temperature').addEventListener('input', function(e) {
+                document.getElementById('temperature_value').textContent = e.target.value;
+            });
+            
+            async function submitRAGQuery(event) {
+                event.preventDefault();
+                
+                const form = event.target;
+                const submitBtn = document.getElementById('submitBtn');
+                const loading = document.getElementById('loading');
+                const resultContainer = document.getElementById('resultContainer');
+                const errorContainer = document.getElementById('errorContainer');
+                
+                // UIをリセット
+                submitBtn.disabled = true;
+                loading.style.display = 'block';
+                resultContainer.classList.remove('show');
+                errorContainer.style.display = 'none';
+                
+                // フォームデータを取得
+                const formData = new FormData(form);
+                const data = {
+                    query: formData.get('query'),
+                    limit: parseInt(formData.get('limit') || '20'),
+                    hybrid_weight: parseFloat(formData.get('hybrid_weight') || '0.5'),
+                    keyword_limit: 10,
+                    vector_limit: 20,
+                    expand_synonyms: formData.get('expand_synonyms') === 'on',
+                    temperature: parseFloat(formData.get('temperature') || '0.7')
+                };
+                
+                try {
+                    const response = await fetch('/search/rag', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText);
+                    }
+                    
+                    const result = await response.json();
+                    
+                    // 回答を表示
+                    document.getElementById('answerContent').textContent = result.answer;
+                    document.getElementById('modelInfo').textContent = 
+                        `使用モデル: ${result.model_used} (プロバイダー: ${result.provider_used})`;
+                    
+                    // ソースを表示
+                    const sourcesList = document.getElementById('sourcesList');
+                    sourcesList.innerHTML = '';
+                    
+                    if (result.sources && result.sources.length > 0) {
+                        result.sources.forEach((source, index) => {
+                            const sourceItem = document.createElement('div');
+                            sourceItem.className = 'source-item';
+                            sourceItem.innerHTML = `
+                                <div class="source-item-header">資料 ${index + 1}</div>
+                                <div class="source-item-path">${source.file_path}${source.location_info ? ' (' + source.location_info + ')' : ''}</div>
+                                <div class="source-item-snippet">${source.snippet || ''}</div>
+                            `;
+                            sourcesList.appendChild(sourceItem);
+                        });
+                    } else {
+                        sourcesList.innerHTML = '<p>参照元がありません</p>';
+                    }
+                    
+                    // 結果を表示
+                    resultContainer.classList.add('show');
+                    
+                } catch (error) {
+                    errorContainer.textContent = 'エラーが発生しました: ' + error.message;
+                    errorContainer.style.display = 'block';
+                } finally {
+                    submitBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content, status_code=200)
 
 
 # APIエンドポイント
@@ -1791,7 +2222,8 @@ def process_vectorize_job(
     model: Optional[str] = None,
     api_base: Optional[str] = None,
     chunk_size: int = 512,
-    chunk_overlap: int = 50
+    chunk_overlap: int = 50,
+    force_revectorize: bool = False
 ):
     """
     ベクトル化ジョブをバックグラウンドで実行
@@ -1942,7 +2374,8 @@ def process_vectorize_job(
         result = vectorizer.vectorize_directory(
             directory_path=directory_path,
             batch_size=10,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            force_revectorize=force_revectorize
         )
         
         # 結果を確認
@@ -1959,16 +2392,36 @@ def process_vectorize_job(
         
         # 完了メッセージにスキップ件数を含める
         skipped_files = result.get("skipped_files", 0)
+        skipped_no_content = result.get("skipped_no_content", 0)
+        skipped_not_updated = result.get("skipped_not_updated", 0)
+        skipped_no_chunks = result.get("skipped_no_chunks", 0)
         processed_files = result.get("processed_files", 0)
         total_chunks = result.get("total_chunks", 0)
+        total_files = result.get("total_files", 0)
         
         completion_message = (
             f"ベクトル化が完了しました。\n"
-            f"処理済み: {processed_files}件"
+            f"総ファイル数: {total_files}件\n"
+            f"処理済み: {processed_files}件\n"
         )
         if skipped_files > 0:
-            completion_message += f", スキップ: {skipped_files}件（更新日時が変更されていないファイル）"
-        completion_message += f"\nチャンク数: {total_chunks}件"
+            completion_message += f"スキップ: {skipped_files}件\n"
+            if skipped_not_updated > 0:
+                completion_message += f"  - 更新日時が変更されていない: {skipped_not_updated}件\n"
+            if skipped_no_content > 0:
+                completion_message += f"  - コンテンツが空: {skipped_no_content}件\n"
+            if skipped_no_chunks > 0:
+                completion_message += f"  - チャンクが生成されなかった: {skipped_no_chunks}件\n"
+        completion_message += f"チャンク数: {total_chunks}件"
+        
+        # スキップされたファイルの詳細をログに出力（最初の10件）
+        skipped_file_details = result.get("skipped_file_details", [])
+        if skipped_file_details:
+            print(f"\nスキップされたファイルの詳細（最初の10件）:")
+            for detail in skipped_file_details[:10]:
+                print(f"  - {detail['file_path']}: {detail['reason']}")
+            if len(skipped_file_details) > 10:
+                print(f"  ... 他 {len(skipped_file_details) - 10}件")
         
         # 完了
         db.job_queue.update_job_status(job_id, JobStatus.COMPLETED)
@@ -2007,7 +2460,8 @@ async def vectorize_directory(request: VectorizeRequest):
                 "model": request.model,
                 "api_base": request.api_base,
                 "chunk_size": request.chunk_size,
-                "chunk_overlap": request.chunk_overlap
+                "chunk_overlap": request.chunk_overlap,
+                "force_revectorize": request.force_revectorize
             },
             initial_progress={
                 "current": 0,
@@ -2027,7 +2481,8 @@ async def vectorize_directory(request: VectorizeRequest):
                 request.model,
                 request.api_base,
                 request.chunk_size,
-                request.chunk_overlap
+                request.chunk_overlap,
+                request.force_revectorize
             ),
             daemon=True
         )

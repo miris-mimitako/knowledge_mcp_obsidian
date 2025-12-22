@@ -238,12 +238,28 @@ class VectorStore:
         コレクションの統計情報を取得
         
         Returns:
-            統計情報（ドキュメント数など）
+            統計情報（チャンク数、ファイル数など）
         """
         count = self.collection.count()
+        
+        # 一意のファイルパスをカウント
+        unique_files = set()
+        try:
+            # すべてのメタデータを取得
+            results = self.collection.get()
+            if results["metadatas"]:
+                for metadata in results["metadatas"]:
+                    file_path = metadata.get("file_path")
+                    if file_path:
+                        unique_files.add(file_path)
+        except Exception:
+            # エラーが発生した場合はファイル数を取得できない
+            pass
+        
         return {
             "collection_name": self.collection_name,
             "total_chunks": count,
+            "total_files": len(unique_files),
             "persist_directory": self.persist_directory
         }
     
