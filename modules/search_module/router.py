@@ -877,6 +877,11 @@ async def task_index():
                 <p>知識ベースに対して質問をして、AIが回答を生成します。</p>
                 <a href="/task/rag">RAG質問応答ページへ</a>
             </div>
+            <div class="task-card">
+                <h2>LLM設定</h2>
+                <p>LLMとEmbeddingモデルの設定を行います。</p>
+                <a href="/task/llm-settings/">LLM設定ページへ</a>
+            </div>
         </div>
     </body>
     </html>
@@ -1908,9 +1913,97 @@ async def rag_page():
                 font-size: 18px;
             }
             .answer-content {
-                white-space: pre-wrap;
-                line-height: 1.6;
+                line-height: 1.8;
                 color: #333;
+            }
+            .answer-content h1,
+            .answer-content h2,
+            .answer-content h3,
+            .answer-content h4 {
+                margin-top: 20px;
+                margin-bottom: 10px;
+                color: #333;
+                font-weight: 600;
+            }
+            .answer-content h1 {
+                font-size: 24px;
+                border-bottom: 2px solid #dee2e6;
+                padding-bottom: 8px;
+            }
+            .answer-content h2 {
+                font-size: 20px;
+                border-bottom: 1px solid #dee2e6;
+                padding-bottom: 6px;
+            }
+            .answer-content h3 {
+                font-size: 18px;
+            }
+            .answer-content h4 {
+                font-size: 16px;
+            }
+            .answer-content p {
+                margin-bottom: 12px;
+            }
+            .answer-content ul,
+            .answer-content ol {
+                margin-bottom: 12px;
+                padding-left: 25px;
+            }
+            .answer-content li {
+                margin-bottom: 6px;
+            }
+            .answer-content code {
+                background-color: #f4f4f4;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-family: 'Courier New', monospace;
+                font-size: 13px;
+            }
+            .answer-content pre {
+                background-color: #f4f4f4;
+                padding: 15px;
+                border-radius: 4px;
+                overflow-x: auto;
+                margin-bottom: 12px;
+            }
+            .answer-content pre code {
+                background-color: transparent;
+                padding: 0;
+            }
+            .answer-content blockquote {
+                border-left: 4px solid #007bff;
+                padding-left: 15px;
+                margin-left: 0;
+                margin-bottom: 12px;
+                color: #666;
+                font-style: italic;
+            }
+            .answer-content strong {
+                font-weight: 600;
+                color: #333;
+            }
+            .answer-content em {
+                font-style: italic;
+            }
+            .answer-content table {
+                border-collapse: collapse;
+                width: 100%;
+                margin-bottom: 12px;
+            }
+            .answer-content table th,
+            .answer-content table td {
+                border: 1px solid #dee2e6;
+                padding: 8px;
+                text-align: left;
+            }
+            .answer-content table th {
+                background-color: #f8f9fa;
+                font-weight: 600;
+            }
+            .answer-content hr {
+                border: none;
+                border-top: 1px solid #dee2e6;
+                margin: 20px 0;
             }
             .sources-section {
                 margin-top: 20px;
@@ -2062,6 +2155,7 @@ async def rag_page():
             <div id="errorContainer" class="error" style="display: none;"></div>
         </div>
         
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <script>
             // スライダーの値を表示
             document.getElementById('hybrid_weight').addEventListener('input', function(e) {
@@ -2071,6 +2165,57 @@ async def rag_page():
             document.getElementById('temperature').addEventListener('input', function(e) {
                 document.getElementById('temperature_value').textContent = e.target.value;
             });
+            
+            // MarkdownをHTMLに変換する関数
+            function markdownToHtml(markdown) {
+                if (typeof marked !== 'undefined') {
+                    // marked.jsを使用
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true
+                    });
+                    return marked.parse(markdown);
+                } else {
+                    // フォールバック: シンプルなMarkdownパーサー
+                    return simpleMarkdownParser(markdown);
+                }
+            }
+            
+            // シンプルなMarkdownパーサー（フォールバック）
+            function simpleMarkdownParser(markdown) {
+                let html = markdown;
+                
+                // 見出し
+                html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+                html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+                html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+                
+                // 太字
+                html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+                
+                // 斜体
+                html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+                
+                // コードブロック
+                html = html.replace(/```([\\s\\S]*?)```/g, '<pre><code>$1</code></pre>');
+                html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+                
+                // リスト
+                html = html.replace(/^\\* (.*$)/gim, '<li>$1</li>');
+                html = html.replace(/^- (.*$)/gim, '<li>$1</li>');
+                html = html.replace(/^\\d+\\. (.*$)/gim, '<li>$1</li>');
+                
+                // 段落
+                html = html.replace(/\\n\\n/g, '</p><p>');
+                html = '<p>' + html + '</p>';
+                
+                // リストのラップ
+                html = html.replace(/(<li>.*?<\\/li>)/g, '<ul>$1</ul>');
+                
+                return html;
+            }
             
             async function submitRAGQuery(event) {
                 event.preventDefault();
@@ -2113,8 +2258,10 @@ async def rag_page():
                     
                     const result = await response.json();
                     
-                    // 回答を表示
-                    document.getElementById('answerContent').textContent = result.answer;
+                    // 回答をMarkdownとして表示
+                    const answerContent = document.getElementById('answerContent');
+                    answerContent.innerHTML = markdownToHtml(result.answer);
+                    
                     document.getElementById('modelInfo').textContent = 
                         `使用モデル: ${result.model_used} (プロバイダー: ${result.provider_used})`;
                     
@@ -2761,6 +2908,605 @@ async def get_llm_models(api_base: Optional[str] = None):
         )
 
 
+# LLM設定関連のAPIエンドポイント
+@task_router.get("/llm-settings/", response_class=HTMLResponse)
+async def llm_settings_page():
+    """
+    LLM設定ページ
+    
+    Returns:
+        HTMLページ
+    """
+    try:
+        # 現在の設定を取得
+        llm_setting = db.get_llm_setting("rag")
+        embedding_setting = db.get_embedding_setting()
+        
+        # ベクトルストアの統計情報を取得
+        try:
+            from .vector_store import VectorStore
+            vector_store = VectorStore()
+            vector_stats = vector_store.get_collection_stats()
+        except:
+            vector_stats = {"total_chunks": 0, "total_files": 0}
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>LLM設定 - Obsidian MCP Server</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: #f5f5f5;
+                }}
+                .container {{
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    padding: 30px;
+                }}
+                h1 {{
+                    color: #333;
+                    margin-bottom: 10px;
+                }}
+                .back-link {{
+                    display: inline-block;
+                    margin-bottom: 20px;
+                    color: #007bff;
+                    text-decoration: none;
+                    font-size: 14px;
+                }}
+                .back-link:hover {{
+                    text-decoration: underline;
+                }}
+                .settings-section {{
+                    margin-bottom: 40px;
+                    padding: 20px;
+                    background-color: #f8f9fa;
+                    border-radius: 8px;
+                }}
+                .settings-section h2 {{
+                    color: #333;
+                    margin-top: 0;
+                    margin-bottom: 20px;
+                    font-size: 20px;
+                }}
+                .form-group {{
+                    margin-bottom: 15px;
+                }}
+                .form-group label {{
+                    display: block;
+                    margin-bottom: 5px;
+                    font-weight: 600;
+                    color: #333;
+                }}
+                .form-group input,
+                .form-group select {{
+                    width: 100%;
+                    padding: 10px;
+                    border: 1px solid #dee2e6;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-family: inherit;
+                }}
+                .form-group input[type="checkbox"] {{
+                    width: auto;
+                    margin-right: 5px;
+                }}
+                .form-row {{
+                    display: flex;
+                    gap: 15px;
+                    flex-wrap: wrap;
+                }}
+                .form-row .form-group {{
+                    flex: 1;
+                    min-width: 200px;
+                }}
+                .btn {{
+                    padding: 12px 24px;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: 600;
+                    transition: background-color 0.2s;
+                    margin-right: 10px;
+                }}
+                .btn-primary {{
+                    background-color: #007bff;
+                    color: white;
+                }}
+                .btn-primary:hover {{
+                    background-color: #0056b3;
+                }}
+                .btn-secondary {{
+                    background-color: #6c757d;
+                    color: white;
+                }}
+                .btn-secondary:hover {{
+                    background-color: #5a6268;
+                }}
+                .btn-danger {{
+                    background-color: #dc3545;
+                    color: white;
+                }}
+                .btn-danger:hover {{
+                    background-color: #c82333;
+                }}
+                .btn:disabled {{
+                    background-color: #6c757d;
+                    cursor: not-allowed;
+                }}
+                .alert {{
+                    padding: 15px;
+                    border-radius: 4px;
+                    margin-bottom: 20px;
+                }}
+                .alert-warning {{
+                    background-color: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    color: #856404;
+                }}
+                .alert-info {{
+                    background-color: #d1ecf1;
+                    border-left: 4px solid #17a2b8;
+                    color: #0c5460;
+                }}
+                .alert-danger {{
+                    background-color: #f8d7da;
+                    border-left: 4px solid #dc3545;
+                    color: #721c24;
+                }}
+                .alert-success {{
+                    background-color: #d4edda;
+                    border-left: 4px solid #28a745;
+                    color: #155724;
+                }}
+                .status-badge {{
+                    display: inline-block;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    margin-left: 10px;
+                }}
+                .status-badge.locked {{
+                    background-color: #dc3545;
+                    color: white;
+                }}
+                .status-badge.unlocked {{
+                    background-color: #28a745;
+                    color: white;
+                }}
+                .loading {{
+                    text-align: center;
+                    padding: 20px;
+                    color: #666;
+                }}
+                .model-list {{
+                    max-height: 200px;
+                    overflow-y: auto;
+                    border: 1px solid #dee2e6;
+                    border-radius: 4px;
+                    padding: 10px;
+                    background-color: white;
+                }}
+                .model-item {{
+                    padding: 8px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    margin-bottom: 5px;
+                }}
+                .model-item:hover {{
+                    background-color: #f8f9fa;
+                }}
+                .model-item.selected {{
+                    background-color: #007bff;
+                    color: white;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <a href="/task/" class="back-link">← タスク管理に戻る</a>
+                <h1>LLM設定</h1>
+                
+                <div id="alertContainer"></div>
+                
+                <!-- LLM設定セクション -->
+                <div class="settings-section">
+                    <h2>LLM設定（RAG用）</h2>
+                    <form id="llmForm" onsubmit="saveLLMSettings(event)">
+                        <div class="form-group">
+                            <label for="llm_provider">プロバイダー:</label>
+                            <select id="llm_provider" name="llm_provider" required onchange="onLLMProviderChange()">
+                                <option value="openrouter" {'selected' if llm_setting and llm_setting.get('provider') == 'openrouter' else ''}>OpenRouter</option>
+                                <option value="litellm" {'selected' if llm_setting and llm_setting.get('provider') == 'litellm' else ''}>LiteLLM</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="llm_litellm_baseurl_group" style="display: {'block' if llm_setting and llm_setting.get('provider') == 'litellm' else 'none'};">
+                            <label for="llm_litellm_baseurl">BaseURL:</label>
+                            <input type="text" id="llm_litellm_baseurl" name="llm_litellm_baseurl" 
+                                   placeholder="http://localhost:4000" 
+                                   value="{llm_setting.get('api_base', '') if llm_setting else ''}">
+                            <button type="button" class="btn btn-secondary" onclick="testLLMConnection()" style="margin-top: 10px;">接続確認</button>
+                            <button type="button" class="btn btn-secondary" onclick="loadLLMModels()" style="margin-top: 10px;">モデル一覧を取得</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="llm_model">モデル:</label>
+                            <input type="text" id="llm_model" name="llm_model" 
+                                   placeholder="モデル名を入力または選択" 
+                                   value="{llm_setting.get('model', '') if llm_setting else ''}">
+                            <div id="llm_model_list" class="model-list" style="display: none; margin-top: 10px;"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">LLM設定を保存</button>
+                    </form>
+                </div>
+                
+                <!-- Embedding設定セクション -->
+                <div class="settings-section">
+                    <h2>Embedding設定（ベクトル化用）</h2>
+                    {'<div class="alert alert-warning">⚠️ ベクトルモデルはロックされています。変更する場合は既存のベクトルデータを削除してください。</div>' if embedding_setting and embedding_setting.get('is_locked') else ''}
+                    {'<div class="alert alert-info">現在のベクトルデータ: {vector_stats.get("total_chunks", 0)} チャンク、{vector_stats.get("total_files", 0)} ファイル</div>' if vector_stats.get("total_chunks", 0) > 0 else ''}
+                    <form id="embeddingForm" onsubmit="saveEmbeddingSettings(event)">
+                        <div class="form-group">
+                            <label for="embedding_provider">プロバイダー:</label>
+                            <select id="embedding_provider" name="embedding_provider" required 
+                                    onchange="onEmbeddingProviderChange()" 
+                                    {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                                <option value="openrouter" {'selected' if embedding_setting and embedding_setting.get('provider') == 'openrouter' else ''}>OpenRouter</option>
+                                <option value="litellm" {'selected' if embedding_setting and embedding_setting.get('provider') == 'litellm' else ''}>LiteLLM</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="embedding_litellm_baseurl_group" style="display: {'block' if embedding_setting and embedding_setting.get('provider') == 'litellm' else 'none'};">
+                            <label for="embedding_litellm_baseurl">BaseURL:</label>
+                            <input type="text" id="embedding_litellm_baseurl" name="embedding_litellm_baseurl" 
+                                   placeholder="http://localhost:4000" 
+                                   value="{embedding_setting.get('api_base', '') if embedding_setting else ''}"
+                                   {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                            <button type="button" class="btn btn-secondary" onclick="testEmbeddingConnection()" style="margin-top: 10px;" {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>接続確認</button>
+                            <button type="button" class="btn btn-secondary" onclick="loadEmbeddingModels()" style="margin-top: 10px;" {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>モデル一覧を取得</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="embedding_model">モデル:</label>
+                            <input type="text" id="embedding_model" name="embedding_model" 
+                                   placeholder="モデル名を入力または選択" 
+                                   value="{embedding_setting.get('model', '') if embedding_setting else ''}"
+                                   {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                            <div id="embedding_model_list" class="model-list" style="display: none; margin-top: 10px;"></div>
+                            {'<div class="alert alert-warning" style="margin-top: 10px;">⚠️ モデルを変更すると、既存のベクトルデータが使用できなくなります。次元サイズが異なる場合は再ベクトル化が必要です。</div>' if embedding_setting and not embedding_setting.get('is_locked') else ''}
+                        </div>
+                        <button type="submit" class="btn btn-primary" {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>Embedding設定を保存</button>
+                    </form>
+                </div>
+            </div>
+            
+            <script>
+                // LLMプロバイダー変更時の処理
+                function onLLMProviderChange() {{
+                    const provider = document.getElementById('llm_provider').value;
+                    const baseurlGroup = document.getElementById('llm_litellm_baseurl_group');
+                    baseurlGroup.style.display = provider === 'litellm' ? 'block' : 'none';
+                }}
+                
+                // Embeddingプロバイダー変更時の処理
+                function onEmbeddingProviderChange() {{
+                    const provider = document.getElementById('embedding_provider').value;
+                    const baseurlGroup = document.getElementById('embedding_litellm_baseurl_group');
+                    baseurlGroup.style.display = provider === 'litellm' ? 'block' : 'none';
+                }}
+                
+                // アラート表示
+                function showAlert(message, type = 'info') {{
+                    const container = document.getElementById('alertContainer');
+                    container.innerHTML = `<div class="alert alert-${{type}}">${{message}}</div>`;
+                    setTimeout(() => {{
+                        container.innerHTML = '';
+                    }}, 5000);
+                }}
+                
+                // LLM接続確認
+                async function testLLMConnection() {{
+                    const baseurl = document.getElementById('llm_litellm_baseurl').value;
+                    if (!baseurl) {{
+                        showAlert('BaseURLを入力してください', 'warning');
+                        return;
+                    }}
+                    
+                    try {{
+                        const response = await fetch(`/search/llm/models?api_base=${{encodeURIComponent(baseurl)}}`);
+                        if (response.ok) {{
+                            showAlert('接続に成功しました', 'success');
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`接続に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`接続に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+                
+                // Embedding接続確認
+                async function testEmbeddingConnection() {{
+                    const baseurl = document.getElementById('embedding_litellm_baseurl').value;
+                    if (!baseurl) {{
+                        showAlert('BaseURLを入力してください', 'warning');
+                        return;
+                    }}
+                    
+                    try {{
+                        const response = await fetch(`/search/llm/models?api_base=${{encodeURIComponent(baseurl)}}`);
+                        if (response.ok) {{
+                            showAlert('接続に成功しました', 'success');
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`接続に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`接続に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+                
+                // LLMモデル一覧を取得
+                async function loadLLMModels() {{
+                    const baseurl = document.getElementById('llm_litellm_baseurl').value;
+                    if (!baseurl) {{
+                        showAlert('BaseURLを入力してください', 'warning');
+                        return;
+                    }}
+                    
+                    try {{
+                        const response = await fetch(`/search/llm/models?api_base=${{encodeURIComponent(baseurl)}}`);
+                        if (response.ok) {{
+                            const data = await response.json();
+                            displayModelList('llm_model_list', 'llm_model', data.models);
+                            showAlert(`${{data.total}}件のモデルを取得しました`, 'success');
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`モデル一覧の取得に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`モデル一覧の取得に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+                
+                // Embeddingモデル一覧を取得
+                async function loadEmbeddingModels() {{
+                    const baseurl = document.getElementById('embedding_litellm_baseurl').value;
+                    if (!baseurl) {{
+                        showAlert('BaseURLを入力してください', 'warning');
+                        return;
+                    }}
+                    
+                    try {{
+                        const response = await fetch(`/search/llm/models?api_base=${{encodeURIComponent(baseurl)}}`);
+                        if (response.ok) {{
+                            const data = await response.json();
+                            displayModelList('embedding_model_list', 'embedding_model', data.models);
+                            showAlert(`${{data.total}}件のモデルを取得しました`, 'success');
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`モデル一覧の取得に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`モデル一覧の取得に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+                
+                // モデルリストを表示
+                function displayModelList(listId, inputId, models) {{
+                    const listDiv = document.getElementById(listId);
+                    const input = document.getElementById(inputId);
+                    
+                    listDiv.innerHTML = '';
+                    models.forEach(model => {{
+                        const item = document.createElement('div');
+                        item.className = 'model-item';
+                        item.textContent = model.id || model.name || model;
+                        item.onclick = () => {{
+                            input.value = model.id || model.name || model;
+                            listDiv.style.display = 'none';
+                        }};
+                        listDiv.appendChild(item);
+                    }});
+                    listDiv.style.display = 'block';
+                }}
+                
+                // LLM設定を保存
+                async function saveLLMSettings(event) {{
+                    event.preventDefault();
+                    
+                    const formData = new FormData(event.target);
+                    const data = {{
+                        provider: formData.get('llm_provider'),
+                        model: formData.get('llm_model'),
+                        api_base: formData.get('llm_litellm_baseurl') || null
+                    }};
+                    
+                    try {{
+                        const response = await fetch('/task/llm-settings/llm', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify(data)
+                        }});
+                        
+                        if (response.ok) {{
+                            showAlert('LLM設定を保存しました', 'success');
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`保存に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`保存に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+                
+                // Embedding設定を保存
+                async function saveEmbeddingSettings(event) {{
+                    event.preventDefault();
+                    
+                    const formData = new FormData(event.target);
+                    const data = {{
+                        provider: formData.get('embedding_provider'),
+                        model: formData.get('embedding_model'),
+                        api_base: formData.get('embedding_litellm_baseurl') || null
+                    }};
+                    
+                    // 既存の設定がある場合は確認
+                    {'if (true) {' if embedding_setting and embedding_setting.get('is_locked') else 'if (false) {'}
+                        if (!confirm('⚠️ 警告: ベクトルモデルを変更すると、既存のベクトルデータが使用できなくなります。\\n\\n続行しますか？')) {{
+                            return;
+                        }}
+                    }}
+                    
+                    try {{
+                        const response = await fetch('/task/llm-settings/embedding', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify(data)
+                        }});
+                        
+                        if (response.ok) {{
+                            showAlert('Embedding設定を保存しました', 'success');
+                            setTimeout(() => {{
+                                location.reload();
+                            }}, 1000);
+                        }} else {{
+                            const error = await response.text();
+                            showAlert(`保存に失敗しました: ${{error}}`, 'danger');
+                        }}
+                    }} catch (error) {{
+                        showAlert(`保存に失敗しました: ${{error.message}}`, 'danger');
+                    }}
+                }}
+            </script>
+        </body>
+        </html>
+        """
+        
+        return HTMLResponse(content=html_content, status_code=200)
+    except Exception as e:
+        import traceback
+        error_html = f"""
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <title>エラー - LLM設定</title>
+        </head>
+        <body>
+            <h1>エラーが発生しました</h1>
+            <p>{str(e)}</p>
+            <pre>{traceback.format_exc()}</pre>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=error_html, status_code=500)
+
+
+# LLM設定保存API
+@task_router.post("/llm-settings/llm")
+async def save_llm_settings(request: dict):
+    """LLM設定を保存"""
+    try:
+        db.save_llm_setting(
+            setting_type="rag",
+            provider=request.get("provider", "openrouter"),
+            model=request.get("model"),
+            api_base=request.get("api_base")
+        )
+        return {"message": "LLM設定を保存しました"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@task_router.post("/llm-settings/embedding")
+async def save_embedding_settings(request: dict):
+    """Embedding設定を保存"""
+    try:
+        provider = request.get("provider", "openrouter")
+        model = request.get("model")
+        api_base = request.get("api_base")
+        
+        if not model:
+            raise HTTPException(status_code=400, detail="モデル名が指定されていません")
+        
+        # モデルの次元数を取得
+        dimensions = 1536  # デフォルト
+        if provider == "openrouter":
+            # OpenRouterのモデル次元数マッピング
+            dimensions_map = {
+                "qwen/qwen3-embedding-8b": 4096,
+            }
+            dimensions = dimensions_map.get(model, 4096)
+        elif provider == "litellm":
+            # LiteLLMのモデル次元数マッピング
+            dimensions_map = {
+                "text-embedding-ada-002": 1536,
+                "text-embedding-3-small": 1536,
+                "text-embedding-3-large": 3072,
+                "gemini/text-embedding-004": 768,
+                "voyage-large-2": 1536,
+            }
+            dimensions = dimensions_map.get(model, 1536)
+        
+        # 既存の設定を確認
+        existing = db.get_embedding_setting()
+        is_locked = False
+        
+        if existing:
+            # 既存の設定がある場合、ロック状態を確認
+            if existing.get("is_locked", False):
+                # ロックされている場合は、モデルが同じかチェック
+                if existing.get("model") != model or existing.get("provider") != provider:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Embedding設定はロックされています。変更する場合は既存のベクトルデータを削除してください。"
+                    )
+                is_locked = True
+            else:
+                # ロックされていない場合、モデルが変更されたら警告
+                if existing.get("model") != model or existing.get("provider") != provider:
+                    # ベクトルデータがある場合はロックする
+                    try:
+                        from .vector_store import VectorStore
+                        vector_store = VectorStore()
+                        stats = vector_store.get_collection_stats()
+                        if stats.get("total_chunks", 0) > 0:
+                            is_locked = True
+                    except:
+                        pass
+        
+        db.save_embedding_setting(
+            provider=provider,
+            model=model,
+            api_base=api_base,
+            dimensions=dimensions,
+            is_locked=is_locked
+        )
+        
+        # 初回保存時は自動的にロック
+        if not existing:
+            db.lock_embedding_setting()
+        
+        return {
+            "message": "Embedding設定を保存しました",
+            "dimensions": dimensions,
+            "is_locked": is_locked
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/rag", response_model=RAGResponse)
 async def rag_query(request: RAGRequest):
     """
@@ -2781,17 +3527,98 @@ async def rag_query(request: RAGRequest):
         raise HTTPException(status_code=400, detail="質問が指定されていません")
     
     try:
-        # 1. ハイブリッド検索を実行してコンテキストを取得
-        hybrid_request = HybridSearchRequest(
-            query=request.query,
-            limit=request.limit,
-            hybrid_weight=request.hybrid_weight,
-            keyword_limit=request.keyword_limit,
-            vector_limit=request.vector_limit,
-            expand_synonyms=request.expand_synonyms
-        )
+        # 1. ベクトルストアの利用可能性を確認
+        vector_store_available = False
+        try:
+            vector_store = VectorStore()
+            stats = vector_store.get_collection_stats()
+            if stats.get("total_chunks", 0) > 0:
+                vector_store_available = True
+        except:
+            pass
         
-        search_response = await hybrid_search(hybrid_request)
+        # 2. ハイブリッド検索を実行してコンテキストを取得
+        # ベクトルストアが利用できない場合は、全文検索のみで実行
+        if not vector_store_available:
+            # 全文検索のみで検索を実行
+            keywords = tokenizer.extract_keywords(request.query)
+            if not keywords:
+                keywords = [request.query.strip()]
+            
+            # 類義語展開（オプション）
+            if request.expand_synonyms:
+                query_expander = QueryExpansion()
+                keywords = query_expander.expand(keywords, use_llm=False)
+            
+            # 全文検索を実行
+            keyword_results = db.search_by_keywords(
+                keywords=keywords,
+                limit_per_keyword=request.keyword_limit,
+                max_total=request.limit
+            )
+            
+            # SearchResult形式に変換
+            search_results = [
+                SearchResult(
+                    file_path=result.get('file_path', ''),
+                    file_type=result.get('file_type'),
+                    location_info=result.get('location_info'),
+                    snippet=result.get('snippet', '')
+                )
+                for result in keyword_results[:request.limit]
+            ]
+            
+            search_response = SearchResponse(
+                query=request.query,
+                results=search_results,
+                total=len(search_results)
+            )
+        else:
+            # ベクトルストアが利用可能な場合はハイブリッド検索を実行
+            hybrid_request = HybridSearchRequest(
+                query=request.query,
+                limit=request.limit,
+                hybrid_weight=request.hybrid_weight,
+                keyword_limit=request.keyword_limit,
+                vector_limit=request.vector_limit,
+                expand_synonyms=request.expand_synonyms
+            )
+            
+            try:
+                search_response = await hybrid_search(hybrid_request)
+            except Exception as e:
+                # ハイブリッド検索が失敗した場合、全文検索のみで再試行
+                print(f"ハイブリッド検索が失敗しました: {str(e)}。全文検索のみで続行します。")
+                
+                keywords = tokenizer.extract_keywords(request.query)
+                if not keywords:
+                    keywords = [request.query.strip()]
+                
+                if request.expand_synonyms:
+                    query_expander = QueryExpansion()
+                    keywords = query_expander.expand(keywords, use_llm=False)
+                
+                keyword_results = db.search_by_keywords(
+                    keywords=keywords,
+                    limit_per_keyword=request.keyword_limit,
+                    max_total=request.limit
+                )
+                
+                search_results = [
+                    SearchResult(
+                        file_path=result.get('file_path', ''),
+                        file_type=result.get('file_type'),
+                        location_info=result.get('location_info'),
+                        snippet=result.get('snippet', '')
+                    )
+                    for result in keyword_results[:request.limit]
+                ]
+                
+                search_response = SearchResponse(
+                    query=request.query,
+                    results=search_results,
+                    total=len(search_results)
+                )
         
         if not search_response.results or len(search_response.results) == 0:
             return RAGResponse(

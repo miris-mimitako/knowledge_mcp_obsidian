@@ -89,6 +89,33 @@ class SearchDatabase:
             )
         """)
         
+        # LLM設定テーブル
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS llm_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setting_type TEXT NOT NULL UNIQUE,
+                provider TEXT NOT NULL,
+                model TEXT,
+                api_base TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Embedding設定テーブル
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS embedding_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                api_base TEXT,
+                dimensions INTEGER NOT NULL,
+                is_locked BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         self.conn.commit()
         
         # ジョブキュー管理を初期化
@@ -684,6 +711,127 @@ class SearchDatabase:
         """
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM watched_directories WHERE id = ?", (dir_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def get_llm_setting(self, setting_type: str = "rag") -> Optional[Dict[str, Any]]:
+        """
+        LLM設定を取得
+        
+        Args:
+            setting_type: 設定タイプ（"rag"など）
+        
+        Returns:
+            LLM設定の辞書、存在しない場合はNone
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM llm_settings WHERE setting_type = ?",
+            (setting_type,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    
+    def save_llm_setting(
+        self,
+        setting_type: str = "rag",
+        provider: str = "openrouter",
+        model: Optional[str] = None,
+        api_base: Optional[str] = None
+    ) -> bool:
+        """
+        LLM設定を保存
+        
+        Args:
+            setting_type: 設定タイプ（"rag"など）
+            provider: プロバイダー（"openrouter"または"litellm"）
+            model: モデル名
+            api_base: APIベースURL（LiteLLMの場合）
+        
+        Returns:
+            成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO llm_settings 
+            (setting_type, provider, model, api_base, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (setting_type, provider, model, api_base))
+        self.conn.commit()
+        return True
+    
+    def get_embedding_setting(self) -> Optional[Dict[str, Any]]:
+        """
+        Embedding設定を取得
+        
+        Returns:
+            Embedding設定の辞書、存在しない場合はNone
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM embedding_settings ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    
+    def save_embedding_setting(
+        self,
+        provider: str,
+        model: str,
+        api_base: Optional[str] = None,
+        dimensions: int = 1536,
+        is_locked: bool = False
+    ) -> bool:
+        """
+        Embedding設定を保存
+        
+        Args:
+            provider: プロバイダー（"openrouter"または"litellm"）
+            model: モデル名
+            api_base: APIベースURL（LiteLLMの場合）
+            dimensions: ベクトルの次元数
+            is_locked: ロック状態（変更不可）
+        
+        Returns:
+            成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        # 既存の設定がある場合は更新、ない場合は新規作成
+        existing = self.get_embedding_setting()
+        if existing:
+            # ロックされている場合は更新不可
+            if existing.get("is_locked", False):
+                raise ValueError("Embedding設定はロックされています。変更する場合は既存のベクトルデータを削除してください。")
+            cursor.execute("""
+                UPDATE embedding_settings 
+                SET provider = ?, model = ?, api_base = ?, dimensions = ?, 
+                    is_locked = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (provider, model, api_base, dimensions, is_locked, existing["id"]))
+        else:
+            cursor.execute("""
+                INSERT INTO embedding_settings 
+                (provider, model, api_base, dimensions, is_locked, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (provider, model, api_base, dimensions, is_locked))
+        self.conn.commit()
+        return True
+    
+    def lock_embedding_setting(self) -> bool:
+        """
+        Embedding設定をロック（変更不可にする）
+        
+        Returns:
+            成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE embedding_settings 
+            SET is_locked = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE is_locked = 0
+        """)
         self.conn.commit()
         return cursor.rowcount > 0
     
