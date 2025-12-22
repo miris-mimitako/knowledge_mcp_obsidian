@@ -223,13 +223,48 @@ def scan_directory(directory_path: str) -> List[str]:
         '.yaml', '.yml', '.csv'
     }
     
+    # 除外する拡張子（データベースファイルなど）
+    excluded_extensions = {
+        '.db', '.sqlite', '.sqlite3', '.db3',
+        '.mdb', '.accdb',  # Access
+        '.fdb', '.gdb',  # Firebird
+        '.sql',  # SQLスクリプト（通常はインデックス対象外）
+        '.dbf',  # dBASE
+        '.ldb', '.laccdb'  # Access ロックファイル
+    }
+    
+    # 除外するディレクトリ名
+    excluded_dirs = {
+        '.git', '.svn', '.hg',  # バージョン管理
+        'node_modules', '__pycache__', '.pytest_cache',  # キャッシュ
+        'venv', 'env', '.venv',  # 仮想環境
+        'chroma_db',  # ChromaDBのデータディレクトリ
+        '.obsidian',  # Obsidianの設定ディレクトリ
+        'dist', 'build', '.next', '.nuxt',  # ビルド成果物
+    }
+    
+    # データベースファイルのパスを取得（除外用）
+    db_path = os.path.abspath(db.db_path) if hasattr(db, 'db_path') else None
+    
     for root, dirs, filenames in os.walk(directory_path):
-        # 隠しディレクトリや不要なディレクトリをスキップ
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        # 除外するディレクトリをスキップ
+        dirs[:] = [d for d in dirs if d not in excluded_dirs and not d.startswith('.')]
         
         for filename in filenames:
-            if Path(filename).suffix.lower() in supported_extensions:
-                file_path = os.path.join(root, filename)
+            file_path = os.path.join(root, filename)
+            file_path_abs = os.path.abspath(file_path)
+            
+            # データベースファイル自体を除外
+            if db_path and file_path_abs == db_path:
+                continue
+            
+            # 除外する拡張子をスキップ
+            ext = Path(filename).suffix.lower()
+            if ext in excluded_extensions:
+                continue
+            
+            # サポートされている拡張子のみを追加
+            if ext in supported_extensions:
                 files.append(file_path)
     
     return files
