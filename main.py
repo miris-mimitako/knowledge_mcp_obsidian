@@ -73,6 +73,10 @@ app.include_router(hello_router)
 app.include_router(search_router)
 app.include_router(task_router)
 
+# 監視スケジューラーを開始
+from modules.search_module.router import start_watcher
+start_watcher()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

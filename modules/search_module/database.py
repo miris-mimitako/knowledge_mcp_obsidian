@@ -75,6 +75,20 @@ class SearchDatabase:
             END
         """)
         
+        # 監視対象ディレクトリテーブル
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS watched_directories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                directory_path TEXT NOT NULL UNIQUE,
+                scan_interval_minutes INTEGER NOT NULL DEFAULT 60,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                last_scan_at DATETIME,
+                last_scan_duration_seconds REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         self.conn.commit()
         
         # ジョブキュー管理を初期化
@@ -336,6 +350,25 @@ class SearchDatabase:
         Returns:
             ドキュメント情報のリスト（id, file_path, file_type, location_info, updated_at, file_modified_time）
         """
+        return self.search_documents(search_query=None, limit=limit, offset=offset)
+    
+    def search_documents(
+        self, 
+        search_query: Optional[str] = None,
+        limit: Optional[int] = None, 
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        ドキュメントを検索（ファイルパス、ファイルタイプ、位置情報で検索）
+        
+        Args:
+            search_query: 検索クエリ（ファイルパス、ファイルタイプ、位置情報に部分一致）
+            limit: 取得件数の上限（Noneの場合は全件）
+            offset: オフセット（ページネーション用）
+        
+        Returns:
+            ドキュメント情報のリスト（id, file_path, file_type, location_info, updated_at, file_modified_time）
+        """
         cursor = self.conn.cursor()
         
         query = """
@@ -348,15 +381,26 @@ class SearchDatabase:
                 d.file_modified_time
             FROM 
                 documents d
-            ORDER BY 
-                d.file_path, d.location_info
         """
         
+        params = []
+        if search_query:
+            search_query = f"%{search_query}%"
+            query += """
+                WHERE 
+                    d.file_path LIKE ? 
+                    OR d.file_type LIKE ?
+                    OR d.location_info LIKE ?
+            """
+            params.extend([search_query, search_query, search_query])
+        
+        query += " ORDER BY d.file_path, d.location_info"
+        
         if limit is not None:
-            query += f" LIMIT ? OFFSET ?"
-            cursor.execute(query, (limit, offset))
-        else:
-            cursor.execute(query)
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+        
+        cursor.execute(query, params)
         
         results = []
         for row in cursor.fetchall():
@@ -370,6 +414,35 @@ class SearchDatabase:
             })
         
         return results
+    
+    def count_documents(self, search_query: Optional[str] = None) -> int:
+        """
+        ドキュメント数を取得（検索条件付き）
+        
+        Args:
+            search_query: 検索クエリ（ファイルパス、ファイルタイプ、位置情報に部分一致）
+        
+        Returns:
+            ドキュメント数
+        """
+        cursor = self.conn.cursor()
+        
+        query = "SELECT COUNT(*) as count FROM documents d"
+        params = []
+        
+        if search_query:
+            search_query = f"%{search_query}%"
+            query += """
+                WHERE 
+                    d.file_path LIKE ? 
+                    OR d.file_type LIKE ?
+                    OR d.location_info LIKE ?
+            """
+            params.extend([search_query, search_query, search_query])
+        
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return row['count'] if row else 0
     
     def get_documents_by_directory(self, directory_path: str) -> List[Dict[str, Any]]:
         """
@@ -457,6 +530,162 @@ class SearchDatabase:
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM documents")
         self.conn.commit()
+    
+    # 監視対象ディレクトリ管理メソッド
+    def add_watched_directory(
+        self,
+        directory_path: str,
+        scan_interval_minutes: int = 60,
+        enabled: bool = True
+    ) -> int:
+        """
+        監視対象ディレクトリを追加
+        
+        Args:
+            directory_path: 監視対象ディレクトリのパス
+            scan_interval_minutes: スキャン間隔（分）
+            enabled: 有効/無効
+        
+        Returns:
+            追加されたディレクトリのID
+        """
+        cursor = self.conn.cursor()
+        normalized_path = os.path.abspath(directory_path)
+        now = datetime.now().isoformat()
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO watched_directories 
+            (directory_path, scan_interval_minutes, enabled, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, (normalized_path, scan_interval_minutes, 1 if enabled else 0, now))
+        
+        dir_id = cursor.lastrowid
+        self.conn.commit()
+        return dir_id
+    
+    def get_watched_directories(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        監視対象ディレクトリ一覧を取得
+        
+        Args:
+            enabled_only: 有効なもののみ取得
+        
+        Returns:
+            監視対象ディレクトリのリスト
+        """
+        cursor = self.conn.cursor()
+        
+        if enabled_only:
+            cursor.execute("""
+                SELECT * FROM watched_directories
+                WHERE enabled = 1
+                ORDER BY directory_path
+            """)
+        else:
+            cursor.execute("""
+                SELECT * FROM watched_directories
+                ORDER BY directory_path
+            """)
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row['id'],
+                "directory_path": row['directory_path'],
+                "scan_interval_minutes": row['scan_interval_minutes'],
+                "enabled": bool(row['enabled']),
+                "last_scan_at": row['last_scan_at'],
+                "last_scan_duration_seconds": row['last_scan_duration_seconds'],
+                "created_at": row['created_at'],
+                "updated_at": row['updated_at']
+            })
+        
+        return results
+    
+    def update_watched_directory(
+        self,
+        dir_id: int,
+        scan_interval_minutes: Optional[int] = None,
+        enabled: Optional[bool] = None
+    ) -> bool:
+        """
+        監視対象ディレクトリの設定を更新
+        
+        Args:
+            dir_id: ディレクトリID
+            scan_interval_minutes: スキャン間隔（分）
+            enabled: 有効/無効
+        
+        Returns:
+            更新に成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        updates = []
+        values = []
+        
+        if scan_interval_minutes is not None:
+            updates.append("scan_interval_minutes = ?")
+            values.append(scan_interval_minutes)
+        
+        if enabled is not None:
+            updates.append("enabled = ?")
+            values.append(1 if enabled else 0)
+        
+        if not updates:
+            return False
+        
+        updates.append("updated_at = ?")
+        values.append(datetime.now().isoformat())
+        values.append(dir_id)
+        
+        cursor.execute(f"""
+            UPDATE watched_directories
+            SET {', '.join(updates)}
+            WHERE id = ?
+        """, values)
+        
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def update_watched_directory_scan_info(
+        self,
+        dir_id: int,
+        scan_duration_seconds: float
+    ):
+        """
+        監視対象ディレクトリのスキャン情報を更新
+        
+        Args:
+            dir_id: ディレクトリID
+            scan_duration_seconds: スキャンにかかった時間（秒）
+        """
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        
+        cursor.execute("""
+            UPDATE watched_directories
+            SET last_scan_at = ?,
+                last_scan_duration_seconds = ?,
+                updated_at = ?
+            WHERE id = ?
+        """, (now, scan_duration_seconds, now, dir_id))
+        
+        self.conn.commit()
+    
+    def delete_watched_directory(self, dir_id: int) -> bool:
+        """
+        監視対象ディレクトリを削除
+        
+        Args:
+            dir_id: ディレクトリID
+        
+        Returns:
+            削除に成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM watched_directories WHERE id = ?", (dir_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
     
     def close(self):
         """データベース接続を閉じる"""
