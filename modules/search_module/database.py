@@ -116,6 +116,45 @@ class SearchDatabase:
             )
         """)
         
+        # コードファイルテーブル（メタデータ管理）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS code_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL UNIQUE,
+                language TEXT,
+                content_hash TEXT,
+                file_modified_time REAL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # コードインデックステーブル（トークンと位置情報）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS code_indices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER NOT NULL,
+                token TEXT NOT NULL,
+                line_number INTEGER NOT NULL,
+                column_number INTEGER,
+                token_type TEXT,
+                FOREIGN KEY (file_id) REFERENCES code_files(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # コードインデックスの検索を高速化するためのインデックス
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_code_indices_token 
+            ON code_indices(token)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_code_indices_file_id 
+            ON code_indices(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_code_indices_token_file 
+            ON code_indices(token, file_id)
+        """)
+        
         self.conn.commit()
         
         # ジョブキュー管理を初期化
@@ -834,6 +873,200 @@ class SearchDatabase:
         """)
         self.conn.commit()
         return cursor.rowcount > 0
+    
+    def add_code_file(
+        self,
+        file_path: str,
+        language: Optional[str] = None,
+        content_hash: Optional[str] = None,
+        file_modified_time: Optional[float] = None
+    ) -> int:
+        """
+        コードファイルを追加または更新
+        
+        Args:
+            file_path: ファイルパス
+            language: プログラミング言語
+            content_hash: コンテンツのハッシュ値
+            file_modified_time: ファイルの更新日時
+        
+        Returns:
+            ファイルID
+        """
+        cursor = self.conn.cursor()
+        
+        # 既存のファイルを確認
+        cursor.execute("SELECT id FROM code_files WHERE file_path = ?", (file_path,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 更新
+            file_id = existing['id']
+            cursor.execute("""
+                UPDATE code_files 
+                SET language = ?, content_hash = ?, file_modified_time = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (language, content_hash, file_modified_time, file_id))
+        else:
+            # 新規追加
+            cursor.execute("""
+                INSERT INTO code_files (file_path, language, content_hash, file_modified_time)
+                VALUES (?, ?, ?, ?)
+            """, (file_path, language, content_hash, file_modified_time))
+            file_id = cursor.lastrowid
+        
+        self.conn.commit()
+        return file_id
+    
+    def add_code_indices(
+        self,
+        file_id: int,
+        tokens: List[Dict[str, Any]]
+    ):
+        """
+        コードインデックスを追加
+        
+        Args:
+            file_id: ファイルID
+            tokens: トークン情報のリスト（token, line, column, typeを含む）
+        """
+        cursor = self.conn.cursor()
+        
+        # 既存のインデックスを削除
+        cursor.execute("DELETE FROM code_indices WHERE file_id = ?", (file_id,))
+        
+        # 新しいインデックスを追加
+        for token_info in tokens:
+            cursor.execute("""
+                INSERT INTO code_indices (file_id, token, line_number, column_number, token_type)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                file_id,
+                token_info.get('token', ''),
+                token_info.get('line', 0),
+                token_info.get('column', 0),
+                token_info.get('type', 'identifier')
+            ))
+        
+        self.conn.commit()
+    
+    def search_code(
+        self,
+        query: str,
+        limit: int = 50,
+        language: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        コード検索を実行
+        
+        Args:
+            query: 検索クエリ（トークン）
+            limit: 返却する結果の最大数
+            language: プログラミング言語でフィルタリング（オプション）
+        
+        Returns:
+            検索結果のリスト
+        """
+        cursor = self.conn.cursor()
+        query_lower = query.lower()
+        
+        # クエリを構築
+        if language:
+            sql = """
+                SELECT DISTINCT
+                    cf.id,
+                    cf.file_path,
+                    cf.language,
+                    ci.line_number,
+                    ci.column_number,
+                    ci.token_type,
+                    ci.token
+                FROM code_indices ci
+                INNER JOIN code_files cf ON ci.file_id = cf.id
+                WHERE ci.token LIKE ? AND cf.language = ?
+                ORDER BY ci.line_number
+                LIMIT ?
+            """
+            params = (f'%{query_lower}%', language, limit)
+        else:
+            sql = """
+                SELECT DISTINCT
+                    cf.id,
+                    cf.file_path,
+                    cf.language,
+                    ci.line_number,
+                    ci.column_number,
+                    ci.token_type,
+                    ci.token
+                FROM code_indices ci
+                INNER JOIN code_files cf ON ci.file_id = cf.id
+                WHERE ci.token LIKE ?
+                ORDER BY ci.line_number
+                LIMIT ?
+            """
+            params = (f'%{query_lower}%', limit)
+        
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        
+        # 結果を整形
+        results = []
+        for row in rows:
+            results.append({
+                'file_id': row['id'],
+                'file_path': row['file_path'],
+                'language': row['language'],
+                'line_number': row['line_number'],
+                'column_number': row['column_number'],
+                'token_type': row['token_type'],
+                'token': row['token']
+            })
+        
+        return results
+    
+    def get_code_file(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """
+        コードファイル情報を取得
+        
+        Args:
+            file_path: ファイルパス
+        
+        Returns:
+            ファイル情報の辞書、存在しない場合はNone
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM code_files WHERE file_path = ?", (file_path,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    
+    def delete_code_file(self, file_path: str) -> bool:
+        """
+        コードファイルとそのインデックスを削除
+        
+        Args:
+            file_path: ファイルパス
+        
+        Returns:
+            削除に成功した場合はTrue
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM code_files WHERE file_path = ?", (file_path,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def get_code_file_count(self) -> int:
+        """
+        コードファイルの総数を取得
+        
+        Returns:
+            コードファイルの総数
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM code_files")
+        row = cursor.fetchone()
+        return row['count'] if row else 0
     
     def close(self):
         """データベース接続を閉じる"""

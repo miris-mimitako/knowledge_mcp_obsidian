@@ -263,6 +263,7 @@ def index_file(
     """
     1つのファイルをインデックスに追加
     ファイルの編集日時が変更されていない場合はスキップ
+    コードファイルの場合はコードパーサーを使用
     
     Args:
         file_path: インデックスに追加するファイルのパス
@@ -273,6 +274,14 @@ def index_file(
     Returns:
         成功した場合、またはスキップされた場合はTrue、失敗した場合はFalse
     """
+    from .parsers import CodeParser, get_code_parser
+    
+    # コードファイルの場合はコードパーサーを使用
+    code_parser = get_code_parser(file_path)
+    if code_parser:
+        return index_code_file(file_path, db, code_parser)
+    
+    # 通常のファイルの場合は既存の処理
     parser = get_parser(file_path)
     if not parser:
         return False
@@ -329,6 +338,106 @@ def index_file(
         import traceback
         error_details = traceback.format_exc()
         print(f"ファイルのインデックス作成に失敗しました: {file_path}")
+        print(f"  エラー: {str(e)}")
+        print(f"  詳細: {error_details}")
+        return False
+
+
+def index_code_file(
+    file_path: str,
+    db: SearchDatabase,
+    code_parser
+) -> bool:
+    """
+    コードファイルをインデックスに追加
+    
+    Args:
+        file_path: コードファイルのパス
+        db: データベースインスタンス
+        code_parser: コードパーサーインスタンス
+    
+    Returns:
+        成功した場合、またはスキップされた場合はTrue、失敗した場合はFalse
+    """
+    import hashlib
+    
+    try:
+        # ファイルの最終更新日時を取得
+        file_modified_time = get_file_modified_time(file_path)
+        
+        # 既存のファイル情報を取得
+        existing_file = db.get_code_file(file_path)
+        
+        # ファイルの内容を読み込んでハッシュを計算
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        except Exception:
+            return False
+        
+        # 既存のファイルがあり、ハッシュと更新日時が同じ場合はスキップ
+        if existing_file:
+            if (existing_file.get('content_hash') == content_hash and 
+                existing_file.get('file_modified_time') == file_modified_time):
+                return True  # スキップ
+        
+        # ファイルを解析してトークンを抽出
+        tokens = code_parser.parse(file_path)
+        
+        if not tokens:
+            return False
+        
+        # 言語を判定
+        ext = Path(file_path).suffix.lower().lstrip('.')
+        language_map = {
+            'py': 'python',
+            'js': 'javascript',
+            'ts': 'typescript',
+            'jsx': 'javascript',
+            'tsx': 'typescript',
+            'java': 'java',
+            'cpp': 'cpp',
+            'c': 'c',
+            'h': 'c',
+            'hpp': 'cpp',
+            'cs': 'csharp',
+            'go': 'go',
+            'rs': 'rust',
+            'rb': 'ruby',
+            'php': 'php',
+            'swift': 'swift',
+            'kt': 'kotlin',
+            'scala': 'scala',
+            'r': 'r',
+            'm': 'objective-c',
+            'mm': 'objective-cpp',
+            'sh': 'bash',
+            'bash': 'bash',
+            'zsh': 'zsh',
+            'fish': 'fish',
+            'ps1': 'powershell',
+            'bat': 'batch',
+            'cmd': 'batch'
+        }
+        language = language_map.get(ext, ext)
+        
+        # コードファイルをデータベースに追加または更新
+        file_id = db.add_code_file(
+            file_path=file_path,
+            language=language,
+            content_hash=content_hash,
+            file_modified_time=file_modified_time
+        )
+        
+        # コードインデックスを追加
+        db.add_code_indices(file_id, tokens)
+        
+        return True
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"コードファイルのインデックス作成に失敗しました: {file_path}")
         print(f"  エラー: {str(e)}")
         print(f"  詳細: {error_details}")
         return False
@@ -644,6 +753,94 @@ async def search_post(request: SearchRequest):
         検索結果
     """
     return await search(query=request.query, limit=request.limit)
+
+
+# コード検索用のリクエスト/レスポンスモデル
+class CodeSearchRequest(BaseModel):
+    """コード検索リクエスト"""
+    query: str = Field(..., description="検索キーワード（トークン）")
+    limit: int = Field(default=50, ge=1, le=100, description="返却する結果の最大数")
+    language: Optional[str] = Field(default=None, description="プログラミング言語でフィルタリング（例: python, javascript）")
+
+
+class CodeSearchResult(BaseModel):
+    """コード検索結果"""
+    file_path: str
+    language: Optional[str]
+    line_number: int
+    column_number: Optional[int]
+    token_type: Optional[str]
+    token: str
+
+
+class CodeSearchResponse(BaseModel):
+    """コード検索レスポンス"""
+    query: str
+    results: List[CodeSearchResult]
+    total: int
+
+
+@router.get("/code", response_model=CodeSearchResponse)
+async def search_code(
+    query: str,
+    limit: int = 50,
+    language: Optional[str] = None
+):
+    """
+    コード検索を実行（GET版）
+    
+    Args:
+        query: 検索キーワード（トークン）
+        limit: 返却する結果の最大数（1-100）
+        language: プログラミング言語でフィルタリング（オプション）
+    
+    Returns:
+        コード検索結果
+    """
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="検索キーワードが指定されていません")
+    
+    if limit < 1 or limit > 100:
+        limit = 50
+    
+    try:
+        # コード検索を実行
+        results = db.search_code(query=query, limit=limit, language=language)
+        
+        # レスポンスモデルに変換
+        search_results = [
+            CodeSearchResult(
+                file_path=result['file_path'],
+                language=result['language'],
+                line_number=result['line_number'],
+                column_number=result['column_number'],
+                token_type=result['token_type'],
+                token=result['token']
+            )
+            for result in results
+        ]
+        
+        return CodeSearchResponse(
+            query=query,
+            results=search_results,
+            total=len(search_results)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"コード検索中にエラーが発生しました: {str(e)}")
+
+
+@router.post("/code", response_model=CodeSearchResponse)
+async def search_code_post(request: CodeSearchRequest):
+    """
+    コード検索を実行（POST版）
+    
+    Args:
+        request: コード検索リクエスト
+    
+    Returns:
+        コード検索結果
+    """
+    return await search_code(query=request.query, limit=request.limit, language=request.language)
 
 
 @router.get("/stats")

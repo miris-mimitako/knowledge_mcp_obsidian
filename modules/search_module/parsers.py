@@ -268,6 +268,125 @@ class TextParser(FileParser):
         return []
 
 
+class CodeParser(FileParser):
+    """コードファイルパーサー（.py, .ts, .tsx, .js, .jsxなど）"""
+    
+    # コードファイルの拡張子
+    CODE_EXTENSIONS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.java', '.cpp', '.c', '.h', '.hpp', 
+                       '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.r', 
+                       '.m', '.mm', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
+    
+    @staticmethod
+    def is_code_file(file_path: str) -> bool:
+        """ファイルがコードファイルかどうかを判定"""
+        ext = Path(file_path).suffix.lower()
+        return ext in CodeParser.CODE_EXTENSIONS
+    
+    @staticmethod
+    def parse(file_path: str) -> List[Dict[str, str]]:
+        """
+        コードファイルを解析してトークンと位置情報を抽出
+        
+        Args:
+            file_path: コードファイルのパス
+        
+        Returns:
+            トークンと位置情報のリスト（通常のパーサーとは異なる形式）
+        """
+        content = ""
+        encodings = ['utf-8', 'shift-jis', 'cp932', 'euc-jp', 'iso-2022-jp']
+        
+        # 複数のエンコーディングを試行
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    content = f.read()
+                    break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        
+        if not content:
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+            except Exception:
+                return []
+        
+        if not content.strip():
+            return []
+        
+        # コードを解析してトークンと位置情報を抽出
+        tokens = CodeParser._extract_tokens(content, file_path)
+        return tokens
+    
+    @staticmethod
+    def _extract_tokens(content: str, file_path: str) -> List[Dict[str, str]]:
+        """
+        コードからトークン（識別子、キーワード、文字列リテラルなど）を抽出
+        
+        Args:
+            content: コードの内容
+            file_path: ファイルパス
+        
+        Returns:
+            トークン情報のリスト
+        """
+        tokens = []
+        lines = content.split('\n')
+        
+        # 正規表現パターン
+        # 識別子（変数名、関数名、クラス名など）
+        identifier_pattern = re.compile(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b')
+        # 文字列リテラル
+        string_pattern = re.compile(r'["\'](?:[^"\'\\]|\\.)*["\']')
+        # 数値リテラル
+        number_pattern = re.compile(r'\b\d+\.?\d*\b')
+        # コメント（行コメントとブロックコメント）
+        comment_pattern = re.compile(r'//.*?$|/\*.*?\*/|#.*?$', re.MULTILINE | re.DOTALL)
+        
+        for line_num, line in enumerate(lines, start=1):
+            # 識別子を抽出
+            for match in identifier_pattern.finditer(line):
+                token = match.group()
+                # キーワードや短すぎるトークンは除外
+                if len(token) >= 2 and not CodeParser._is_keyword(token):
+                    tokens.append({
+                        'token': token.lower(),  # 小文字に正規化
+                        'line': line_num,
+                        'column': match.start(),
+                        'type': 'identifier'
+                    })
+            
+            # 文字列リテラルを抽出
+            for match in string_pattern.finditer(line):
+                token = match.group()
+                # 文字列の中身を抽出（クォートを除く）
+                inner = token[1:-1]
+                if len(inner) >= 2:
+                    tokens.append({
+                        'token': inner.lower(),
+                        'line': line_num,
+                        'column': match.start(),
+                        'type': 'string'
+                    })
+        
+        return tokens
+    
+    @staticmethod
+    def _is_keyword(token: str) -> bool:
+        """トークンがプログラミング言語のキーワードかどうかを判定"""
+        # 主要なプログラミング言語のキーワード（簡易版）
+        keywords = {
+            'if', 'else', 'elif', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
+            'return', 'def', 'class', 'import', 'from', 'as', 'try', 'except', 'finally',
+            'with', 'async', 'await', 'const', 'let', 'var', 'function', 'export', 'default',
+            'public', 'private', 'protected', 'static', 'final', 'abstract', 'interface',
+            'extends', 'implements', 'new', 'this', 'super', 'null', 'undefined', 'true', 'false',
+            'and', 'or', 'not', 'in', 'is', 'None', 'True', 'False', 'pass', 'yield', 'lambda'
+        }
+        return token.lower() in keywords
+
+
 def get_parser(file_path: str) -> Optional[FileParser]:
     """
     ファイルパスに基づいて適切なパーサーを取得
@@ -280,6 +399,10 @@ def get_parser(file_path: str) -> Optional[FileParser]:
     """
     ext = Path(file_path).suffix.lower()
     
+    # コードファイルの場合はCodeParserを使用
+    if CodeParser.is_code_file(file_path):
+        return CodeParser()
+    
     parsers = {
         '.pdf': PDFParser,
         '.docx': WordParser,
@@ -288,11 +411,6 @@ def get_parser(file_path: str) -> Optional[FileParser]:
         '.txt': TextParser,
         '.md': TextParser,
         '.markdown': TextParser,
-        '.py': TextParser,
-        '.js': TextParser,
-        '.ts': TextParser,
-        '.jsx': TextParser,
-        '.tsx': TextParser,
         '.json': TextParser,
         '.xml': TextParser,
         '.html': TextParser,
@@ -304,4 +422,19 @@ def get_parser(file_path: str) -> Optional[FileParser]:
     
     parser_class = parsers.get(ext)
     return parser_class() if parser_class else None
+
+
+def get_code_parser(file_path: str) -> Optional[CodeParser]:
+    """
+    コードファイル用のパーサーを取得
+    
+    Args:
+        file_path: コードファイルのパス
+    
+    Returns:
+        CodeParserインスタンス、コードファイルでない場合はNone
+    """
+    if CodeParser.is_code_file(file_path):
+        return CodeParser()
+    return None
 
