@@ -636,6 +636,95 @@ task_router = APIRouter(
 )
 
 
+@task_router.get("/", response_class=HTMLResponse)
+async def task_index():
+    """
+    タスク管理のメインページ
+    
+    Returns:
+        HTMLページ
+    """
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>タスク管理 - Obsidian MCP Server</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 40px 20px;
+                background-color: #f5f5f5;
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 30px;
+            }
+            .task-list {
+                display: grid;
+                gap: 20px;
+            }
+            .task-card {
+                background: white;
+                border-radius: 8px;
+                padding: 24px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .task-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
+            .task-card h2 {
+                margin: 0 0 12px 0;
+                color: #2c3e50;
+            }
+            .task-card p {
+                color: #666;
+                margin: 0 0 16px 0;
+            }
+            .task-card a {
+                display: inline-block;
+                background-color: #007bff;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                transition: background-color 0.2s;
+            }
+            .task-card a:hover {
+                background-color: #0056b3;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>タスク管理</h1>
+        <div class="task-list">
+            <div class="task-card">
+                <h2>インデックス作成</h2>
+                <p>ディレクトリをスキャンして全文検索用のインデックスを作成します。</p>
+                <a href="/task/create_index">インデックス作成ページへ</a>
+            </div>
+            <div class="task-card">
+                <h2>ベクトル化</h2>
+                <p>ドキュメントをベクトル化してベクトル検索用のデータを作成します。</p>
+                <a href="/task/create_vector">ベクトル化ページへ</a>
+            </div>
+            <div class="task-card">
+                <h2>インデックスリスト</h2>
+                <p>インデックスされたファイルの一覧を確認できます。</p>
+                <a href="/task/index_lists/">インデックスリストページへ</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
+
+
 @task_router.get("/create_index", response_class=HTMLResponse)
 async def create_index_page():
     """
@@ -658,6 +747,221 @@ async def create_vector_page():
     """
     html_content = load_html_template("vector_status.html")
     return HTMLResponse(content=html_content, status_code=200)
+
+
+@task_router.get("/index_lists/", response_class=HTMLResponse)
+async def index_lists_page():
+    """
+    インデックスされたファイルのリストを表示するWebページ
+    
+    Returns:
+        HTMLページ
+    """
+    try:
+        # データベースから全ドキュメントを取得
+        documents = db.get_all_documents()
+        total_count = db.get_document_count()
+        
+        # ファイルパスでグループ化（同じファイルの異なるlocation_infoをまとめる）
+        files_dict = {}
+        for doc in documents:
+            file_path = doc['file_path']
+            if file_path not in files_dict:
+                files_dict[file_path] = {
+                    'file_path': file_path,
+                    'file_type': doc['file_type'],
+                    'locations': [],
+                    'updated_at': doc['updated_at'],
+                    'file_modified_time': doc['file_modified_time']
+                }
+            if doc['location_info']:
+                files_dict[file_path]['locations'].append(doc['location_info'])
+        
+        # ファイルリストをソート
+        files_list = sorted(files_dict.values(), key=lambda x: x['file_path'])
+        
+        # HTMLを生成
+        from datetime import datetime
+        
+        def format_datetime(dt_str):
+            """日時をフォーマット"""
+            if not dt_str:
+                return "-"
+            try:
+                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                return dt_str
+        
+        def format_timestamp(ts):
+            """タイムスタンプをフォーマット"""
+            if not ts:
+                return "-"
+            try:
+                dt = datetime.fromtimestamp(ts)
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                return "-"
+        
+        files_html = ""
+        for file_info in files_list:
+            file_path = file_info['file_path']
+            file_type = file_info['file_type'] or "-"
+            locations = file_info['locations']
+            updated_at = format_datetime(file_info['updated_at'])
+            file_modified_time = format_timestamp(file_info['file_modified_time'])
+            
+            locations_html = ""
+            if locations:
+                locations_html = f"<div class='locations'>{', '.join(locations)}</div>"
+            
+            files_html += f"""
+            <tr>
+                <td class="file-path">{file_path}</td>
+                <td class="file-type">{file_type}</td>
+                <td class="locations-cell">{locations_html if locations_html else '-'}</td>
+                <td class="updated-at">{updated_at}</td>
+                <td class="file-modified">{file_modified_time}</td>
+            </tr>
+            """
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>インデックスリスト - Obsidian MCP Server</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: #f5f5f5;
+                }}
+                .container {{
+                    max-width: 1400px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    padding: 30px;
+                }}
+                h1 {{
+                    color: #333;
+                    margin-bottom: 10px;
+                }}
+                .stats {{
+                    color: #666;
+                    margin-bottom: 20px;
+                    font-size: 14px;
+                }}
+                .back-link {{
+                    display: inline-block;
+                    margin-bottom: 20px;
+                    color: #007bff;
+                    text-decoration: none;
+                    font-size: 14px;
+                }}
+                .back-link:hover {{
+                    text-decoration: underline;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }}
+                th {{
+                    background-color: #f8f9fa;
+                    padding: 12px;
+                    text-align: left;
+                    font-weight: 600;
+                    color: #333;
+                    border-bottom: 2px solid #dee2e6;
+                    position: sticky;
+                    top: 0;
+                }}
+                td {{
+                    padding: 12px;
+                    border-bottom: 1px solid #dee2e6;
+                    vertical-align: top;
+                }}
+                tr:hover {{
+                    background-color: #f8f9fa;
+                }}
+                .file-path {{
+                    font-family: 'Courier New', monospace;
+                    font-size: 13px;
+                    word-break: break-all;
+                    max-width: 500px;
+                }}
+                .file-type {{
+                    text-align: center;
+                    min-width: 80px;
+                }}
+                .locations-cell {{
+                    max-width: 300px;
+                }}
+                .locations {{
+                    font-size: 12px;
+                    color: #666;
+                    word-break: break-word;
+                }}
+                .updated-at, .file-modified {{
+                    font-size: 12px;
+                    color: #666;
+                    white-space: nowrap;
+                }}
+                .no-data {{
+                    text-align: center;
+                    padding: 40px;
+                    color: #999;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <a href="/task/" class="back-link">← タスク管理に戻る</a>
+                <h1>インデックスリスト</h1>
+                <div class="stats">
+                    総ファイル数: {len(files_list)} | 総ドキュメント数: {total_count}
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ファイルパス</th>
+                            <th>ファイルタイプ</th>
+                            <th>位置情報</th>
+                            <th>更新日時</th>
+                            <th>ファイル更新日時</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {files_html if files_html else '<tr><td colspan="5" class="no-data">インデックスされたファイルがありません</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return HTMLResponse(content=html_content, status_code=200)
+    except Exception as e:
+        error_html = f"""
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <title>エラー - Obsidian MCP Server</title>
+        </head>
+        <body>
+            <h1>エラーが発生しました</h1>
+            <p>{str(e)}</p>
+            <a href="/task/">タスク管理に戻る</a>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=error_html, status_code=500)
 
 
 def process_vectorize_job(

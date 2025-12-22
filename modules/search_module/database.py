@@ -325,6 +325,52 @@ class SearchDatabase:
         row = cursor.fetchone()
         return row['count'] if row else 0
     
+    def get_all_documents(self, limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        すべてのドキュメントを取得
+        
+        Args:
+            limit: 取得件数の上限（Noneの場合は全件）
+            offset: オフセット（ページネーション用）
+        
+        Returns:
+            ドキュメント情報のリスト（id, file_path, file_type, location_info, updated_at, file_modified_time）
+        """
+        cursor = self.conn.cursor()
+        
+        query = """
+            SELECT 
+                d.id,
+                d.file_path,
+                d.file_type,
+                d.location_info,
+                d.updated_at,
+                d.file_modified_time
+            FROM 
+                documents d
+            ORDER BY 
+                d.file_path, d.location_info
+        """
+        
+        if limit is not None:
+            query += f" LIMIT ? OFFSET ?"
+            cursor.execute(query, (limit, offset))
+        else:
+            cursor.execute(query)
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row['id'],
+                "file_path": row['file_path'],
+                "file_type": row['file_type'],
+                "location_info": row['location_info'],
+                "updated_at": row['updated_at'],
+                "file_modified_time": row['file_modified_time']
+            })
+        
+        return results
+    
     def get_documents_by_directory(self, directory_path: str) -> List[Dict[str, Any]]:
         """
         指定されたディレクトリパスに含まれるドキュメントを取得

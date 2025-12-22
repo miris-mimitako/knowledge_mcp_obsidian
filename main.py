@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 import os
 
 # .envファイルのサポート（python-dotenvがインストールされている場合）
@@ -26,15 +27,11 @@ app.add_middleware(
     allow_headers=["*"],  # すべてのヘッダーを許可
 )
 
-# ルートパス用のエンドポイント
+# ルートパス用のエンドポイント - /task/ にリダイレクト
 @app.get("/")
 async def root():
-    """ルートエンドポイント - サーバー情報を返す"""
-    return {
-        "message": "Obsidian MCP Server",
-        "version": "1.0.0",
-        "status": "running"
-    }
+    """ルートエンドポイント - /task/ にリダイレクト"""
+    return RedirectResponse(url="/task/")
 
 @app.get("/health")
 async def health_check():
