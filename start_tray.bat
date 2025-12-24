@@ -57,7 +57,17 @@ echo ====================================
 echo タスクトレイアイコンを右クリックしてメニューを表示できます
 echo.
 
-python tray_icon.py
+REM venvのpythonw.exeを使用して非同期で起動（ウィンドウを表示しない）
+if exist "venv\Scripts\pythonw.exe" (
+    start "" venv\Scripts\pythonw.exe tray_icon.py
+) else (
+    REM venvがない場合は通常のpythonw.exeを使用
+    start "" pythonw.exe tray_icon.py
+)
 
-pause
+REM 少し待ってからウィンドウを閉じる（起動に時間がかかる場合があるため）
+timeout /t 1 /nobreak >nul
+
+REM バッチファイルのウィンドウを閉じる
+exit
 

@@ -281,6 +281,7 @@ class SearchDatabase:
                 
                 # FTSテーブルを更新（削除して再挿入）
                 # FTS5の削除構文を使用して既存のエントリを削除
+                # 削除操作を確実に実行（エラーを無視しない）
                 try:
                     cursor.execute("""
                         INSERT INTO documents_fts(documents_fts, rowid, content)
@@ -288,13 +289,31 @@ class SearchDatabase:
                     """, (doc_id,))
                 except sqlite3.Error as fts_error:
                     # FTS削除でエラーが発生した場合も続行（既に存在しない可能性）
-                    print(f"FTS削除エラー（無視）: {str(fts_error)}")
+                    # ただし、ログには記録する
+                    pass
                 
                 # 新しいコンテンツを挿入
-                cursor.execute("""
-                    INSERT INTO documents_fts (rowid, content)
-                    VALUES (?, ?)
-                """, (doc_id, content))
+                # 既存のエントリが残っている可能性があるため、削除を再度試みてから挿入
+                try:
+                    cursor.execute("""
+                        INSERT INTO documents_fts (rowid, content)
+                        VALUES (?, ?)
+                    """, (doc_id, content))
+                except sqlite3.Error as insert_error:
+                    # 挿入が失敗した場合（既に存在する可能性）、削除を再度試みる
+                    try:
+                        cursor.execute("""
+                            INSERT INTO documents_fts(documents_fts, rowid, content)
+                            VALUES('delete', ?, '')
+                        """, (doc_id,))
+                        # 削除後に再度挿入を試みる
+                        cursor.execute("""
+                            INSERT INTO documents_fts (rowid, content)
+                            VALUES (?, ?)
+                        """, (doc_id, content))
+                    except sqlite3.Error as retry_error:
+                        # 再試行も失敗した場合はエラーを再発生
+                        raise sqlite3.Error(f"FTS更新エラー: {str(retry_error)}") from retry_error
                 
                 self.conn.commit()
                 return doc_id

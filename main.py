@@ -2,14 +2,27 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import os
+import sys
+
+# 標準出力のエンコーディングをUTF-8に設定（Windows環境での特殊文字出力エラーを防ぐ）
+if sys.platform == 'win32':
+    try:
+        # 標準出力のエンコーディングをUTF-8に設定
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        # 設定に失敗した場合は無視（後で安全な出力方法を使用）
+        pass
 
 # .envファイルのサポート（python-dotenvがインストールされている場合）
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    print("✓ .envファイルを読み込みました（python-dotenvが利用可能な場合）")
+    print("[OK] .envファイルを読み込みました（python-dotenvが利用可能な場合）")
 except ImportError:
-    print("⚠ python-dotenvがインストールされていません。.envファイルは読み込まれません。")
+    print("[WARN] python-dotenvがインストールされていません。.envファイルは読み込まれません。")
 
 # モジュールのrouterをインポート
 from modules.hello_module import router as hello_router
