@@ -1299,6 +1299,11 @@ async def task_index():
                 <p>LLMとEmbeddingモデルの設定を行います。</p>
                 <a href="/task/llm-settings/">LLM設定ページへ</a>
             </div>
+            <div class="task-card">
+                <h2>💾 データベースサイズ管理</h2>
+                <p>データベースの保存サイズと統計情報を確認できます。</p>
+                <a href="/task/db_status">データベースサイズ管理ページへ</a>
+            </div>
         </div>
     </body>
     </html>
@@ -1327,6 +1332,18 @@ async def create_vector_page():
         HTMLページ
     """
     html_content = load_html_template("vector_status.html")
+    return HTMLResponse(content=html_content, status_code=200)
+
+
+@task_router.get("/db_status", response_class=HTMLResponse)
+async def db_status_page():
+    """
+    データベースサイズ管理ページ
+    
+    Returns:
+        HTMLページ
+    """
+    html_content = load_html_template("db_status.html")
     return HTMLResponse(content=html_content, status_code=200)
 
 
@@ -3103,6 +3120,110 @@ async def get_vectorize_stats():
         raise HTTPException(status_code=500, detail=f"統計情報の取得中にエラーが発生しました: {str(e)}")
 
 
+@router.get("/db/stats")
+async def get_db_stats():
+    """
+    データベースのサイズと統計情報を取得
+    
+    Returns:
+        データベースサイズ情報（SQLite、ChromaDB、テーブル統計など）
+    """
+    try:
+        import os
+        from pathlib import Path
+        
+        # SQLiteデータベースのサイズ
+        sqlite_path = Path(db.db_path)
+        sqlite_size = 0
+        if sqlite_path.exists():
+            sqlite_size = sqlite_path.stat().st_size
+        
+        # SQLiteテーブル統計
+        cursor = db.conn.cursor()
+        
+        # documentsテーブルの統計
+        cursor.execute("SELECT COUNT(*) as count FROM documents")
+        doc_count = cursor.fetchone()['count']
+        
+        # code_filesテーブルの統計
+        cursor.execute("SELECT COUNT(*) as count FROM code_files")
+        code_file_count = cursor.fetchone()['count']
+        
+        # code_indicesテーブルの統計
+        cursor.execute("SELECT COUNT(*) as count FROM code_indices")
+        code_index_count = cursor.fetchone()['count']
+        
+        # job_queueテーブルの統計
+        cursor.execute("SELECT COUNT(*) as count FROM job_queue")
+        job_count = cursor.fetchone()['count']
+        
+        # watched_directoriesテーブルの統計
+        cursor.execute("SELECT COUNT(*) as count FROM watched_directories")
+        watched_dir_count = cursor.fetchone()['count']
+        
+        # SQLiteデータベースのページサイズとページ数を取得（より正確なサイズ計算）
+        try:
+            cursor.execute("PRAGMA page_count")
+            page_count = cursor.fetchone()[0]
+            cursor.execute("PRAGMA page_size")
+            page_size = cursor.fetchone()[0]
+            sqlite_actual_size = page_count * page_size
+        except:
+            sqlite_actual_size = sqlite_size
+        
+        # ChromaDBディレクトリのサイズ
+        chroma_path = Path("./chroma_db")
+        chroma_size = 0
+        chroma_file_count = 0
+        if chroma_path.exists():
+            for file_path in chroma_path.rglob("*"):
+                if file_path.is_file():
+                    chroma_size += file_path.stat().st_size
+                    chroma_file_count += 1
+        
+        # ChromaDBコレクション統計
+        vector_store = VectorStore()
+        vector_stats = vector_store.get_collection_stats()
+        
+        # サイズを読みやすい形式に変換
+        def format_size(size_bytes):
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if size_bytes < 1024.0:
+                    return f"{size_bytes:.2f} {unit}"
+                size_bytes /= 1024.0
+            return f"{size_bytes:.2f} PB"
+        
+        return {
+            "sqlite": {
+                "path": str(sqlite_path.absolute()),
+                "size_bytes": sqlite_size,
+                "size_formatted": format_size(sqlite_size),
+                "actual_size_bytes": sqlite_actual_size,
+                "actual_size_formatted": format_size(sqlite_actual_size),
+                "tables": {
+                    "documents": doc_count,
+                    "code_files": code_file_count,
+                    "code_indices": code_index_count,
+                    "job_queue": job_count,
+                    "watched_directories": watched_dir_count
+                }
+            },
+            "chromadb": {
+                "path": str(chroma_path.absolute()),
+                "size_bytes": chroma_size,
+                "size_formatted": format_size(chroma_size),
+                "file_count": chroma_file_count,
+                "collection_stats": vector_stats
+            },
+            "total": {
+                "size_bytes": sqlite_size + chroma_size,
+                "size_formatted": format_size(sqlite_size + chroma_size)
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"データベース統計情報の取得中にエラーが発生しました: {str(e)}")
+
+
 @router.post("/hybrid", response_model=SearchResponse)
 async def hybrid_search(request: HybridSearchRequest):
     """
@@ -3569,6 +3690,7 @@ async def llm_settings_page():
                             <select id="llm_provider" name="llm_provider" required onchange="onLLMProviderChange()">
                                 <option value="openrouter" {'selected' if llm_setting and llm_setting.get('provider') == 'openrouter' else ''}>OpenRouter</option>
                                 <option value="litellm" {'selected' if llm_setting and llm_setting.get('provider') == 'litellm' else ''}>LiteLLM</option>
+                                <option value="aws_bedrock" {'selected' if llm_setting and llm_setting.get('provider') == 'aws_bedrock' else ''}>AWS Bedrock</option>
                             </select>
                         </div>
                         <div class="form-group" id="llm_litellm_baseurl_group" style="display: {'block' if llm_setting and llm_setting.get('provider') == 'litellm' else 'none'};">
@@ -3578,6 +3700,28 @@ async def llm_settings_page():
                                    value="{llm_setting.get('api_base', '') if llm_setting else ''}">
                             <button type="button" class="btn btn-secondary" onclick="testLLMConnection()" style="margin-top: 10px;">接続確認</button>
                             <button type="button" class="btn btn-secondary" onclick="loadLLMModels()" style="margin-top: 10px;">モデル一覧を取得</button>
+                        </div>
+                        <div class="form-group" id="llm_aws_bedrock_group" style="display: {'block' if llm_setting and llm_setting.get('provider') == 'aws_bedrock' else 'none'};">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="llm_aws_region">AWSリージョン:</label>
+                                    <input type="text" id="llm_aws_region" name="llm_aws_region" 
+                                           placeholder="us-east-1" 
+                                           value="{llm_setting.get('aws_region_name', '') if llm_setting else ''}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm_aws_access_key_id">AWSアクセスキーID:</label>
+                                    <input type="text" id="llm_aws_access_key_id" name="llm_aws_access_key_id" 
+                                           placeholder="環境変数から取得可能" 
+                                           value="{llm_setting.get('aws_access_key_id', '') if llm_setting else ''}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm_aws_secret_access_key">AWSシークレットキー:</label>
+                                    <input type="password" id="llm_aws_secret_access_key" name="llm_aws_secret_access_key" 
+                                           placeholder="環境変数から取得可能" 
+                                           value="{llm_setting.get('aws_secret_access_key', '') if llm_setting else ''}">
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="llm_model">モデル:</label>
@@ -3603,6 +3747,7 @@ async def llm_settings_page():
                                     {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
                                 <option value="openrouter" {'selected' if embedding_setting and embedding_setting.get('provider') == 'openrouter' else ''}>OpenRouter</option>
                                 <option value="litellm" {'selected' if embedding_setting and embedding_setting.get('provider') == 'litellm' else ''}>LiteLLM</option>
+                                <option value="aws_bedrock" {'selected' if embedding_setting and embedding_setting.get('provider') == 'aws_bedrock' else ''}>AWS Bedrock</option>
                             </select>
                         </div>
                         <div class="form-group" id="embedding_litellm_baseurl_group" style="display: {'block' if embedding_setting and embedding_setting.get('provider') == 'litellm' else 'none'};">
@@ -3613,6 +3758,31 @@ async def llm_settings_page():
                                    {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
                             <button type="button" class="btn btn-secondary" onclick="testEmbeddingConnection()" style="margin-top: 10px;" {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>接続確認</button>
                             <button type="button" class="btn btn-secondary" onclick="loadEmbeddingModels()" style="margin-top: 10px;" {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>モデル一覧を取得</button>
+                        </div>
+                        <div class="form-group" id="embedding_aws_bedrock_group" style="display: {'block' if embedding_setting and embedding_setting.get('provider') == 'aws_bedrock' else 'none'};">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="embedding_aws_region">AWSリージョン:</label>
+                                    <input type="text" id="embedding_aws_region" name="embedding_aws_region" 
+                                           placeholder="us-east-1" 
+                                           value="{embedding_setting.get('aws_region_name', '') if embedding_setting else ''}"
+                                           {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                                </div>
+                                <div class="form-group">
+                                    <label for="embedding_aws_access_key_id">AWSアクセスキーID:</label>
+                                    <input type="text" id="embedding_aws_access_key_id" name="embedding_aws_access_key_id" 
+                                           placeholder="環境変数から取得可能" 
+                                           value="{embedding_setting.get('aws_access_key_id', '') if embedding_setting else ''}"
+                                           {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                                </div>
+                                <div class="form-group">
+                                    <label for="embedding_aws_secret_access_key">AWSシークレットキー:</label>
+                                    <input type="password" id="embedding_aws_secret_access_key" name="embedding_aws_secret_access_key" 
+                                           placeholder="環境変数から取得可能" 
+                                           value="{embedding_setting.get('aws_secret_access_key', '') if embedding_setting else ''}"
+                                           {'disabled' if embedding_setting and embedding_setting.get('is_locked') else ''}>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="embedding_model">モデル:</label>
@@ -3633,14 +3803,18 @@ async def llm_settings_page():
                 function onLLMProviderChange() {{
                     const provider = document.getElementById('llm_provider').value;
                     const baseurlGroup = document.getElementById('llm_litellm_baseurl_group');
+                    const awsGroup = document.getElementById('llm_aws_bedrock_group');
                     baseurlGroup.style.display = provider === 'litellm' ? 'block' : 'none';
+                    awsGroup.style.display = provider === 'aws_bedrock' ? 'block' : 'none';
                 }}
                 
                 // Embeddingプロバイダー変更時の処理
                 function onEmbeddingProviderChange() {{
                     const provider = document.getElementById('embedding_provider').value;
                     const baseurlGroup = document.getElementById('embedding_litellm_baseurl_group');
+                    const awsGroup = document.getElementById('embedding_aws_bedrock_group');
                     baseurlGroup.style.display = provider === 'litellm' ? 'block' : 'none';
+                    awsGroup.style.display = provider === 'aws_bedrock' ? 'block' : 'none';
                 }}
                 
                 // アラート表示
@@ -3764,10 +3938,14 @@ async def llm_settings_page():
                     event.preventDefault();
                     
                     const formData = new FormData(event.target);
+                    const provider = formData.get('llm_provider');
                     const data = {{
-                        provider: formData.get('llm_provider'),
+                        provider: provider,
                         model: formData.get('llm_model'),
-                        api_base: formData.get('llm_litellm_baseurl') || null
+                        api_base: provider === 'litellm' ? (formData.get('llm_litellm_baseurl') || null) : null,
+                        aws_region_name: provider === 'aws_bedrock' ? (formData.get('llm_aws_region') || null) : null,
+                        aws_access_key_id: provider === 'aws_bedrock' ? (formData.get('llm_aws_access_key_id') || null) : null,
+                        aws_secret_access_key: provider === 'aws_bedrock' ? (formData.get('llm_aws_secret_access_key') || null) : null
                     }};
                     
                     try {{
@@ -3793,10 +3971,14 @@ async def llm_settings_page():
                     event.preventDefault();
                     
                     const formData = new FormData(event.target);
+                    const provider = formData.get('embedding_provider');
                     const data = {{
-                        provider: formData.get('embedding_provider'),
+                        provider: provider,
                         model: formData.get('embedding_model'),
-                        api_base: formData.get('embedding_litellm_baseurl') || null
+                        api_base: provider === 'litellm' ? (formData.get('embedding_litellm_baseurl') || null) : null,
+                        aws_region_name: provider === 'aws_bedrock' ? (formData.get('embedding_aws_region') || null) : null,
+                        aws_access_key_id: provider === 'aws_bedrock' ? (formData.get('embedding_aws_access_key_id') || null) : null,
+                        aws_secret_access_key: provider === 'aws_bedrock' ? (formData.get('embedding_aws_secret_access_key') || null) : null
                     }};
                     
                     // 既存の設定がある場合は確認
@@ -3860,7 +4042,10 @@ async def save_llm_settings(request: dict):
             setting_type="rag",
             provider=request.get("provider", "openrouter"),
             model=request.get("model"),
-            api_base=request.get("api_base")
+            api_base=request.get("api_base"),
+            aws_region_name=request.get("aws_region_name"),
+            aws_access_key_id=request.get("aws_access_key_id"),
+            aws_secret_access_key=request.get("aws_secret_access_key")
         )
         return {"message": "LLM設定を保存しました"}
     except Exception as e:
@@ -3874,6 +4059,9 @@ async def save_embedding_settings(request: dict):
         provider = request.get("provider", "openrouter")
         model = request.get("model")
         api_base = request.get("api_base")
+        aws_region_name = request.get("aws_region_name")
+        aws_access_key_id = request.get("aws_access_key_id")
+        aws_secret_access_key = request.get("aws_secret_access_key")
         
         if not model:
             raise HTTPException(status_code=400, detail="モデル名が指定されていません")
@@ -3894,6 +4082,13 @@ async def save_embedding_settings(request: dict):
                 "text-embedding-3-large": 3072,
                 "gemini/text-embedding-004": 768,
                 "voyage-large-2": 1536,
+            }
+            dimensions = dimensions_map.get(model, 1536)
+        elif provider == "aws_bedrock":
+            # AWS Bedrockのモデル次元数マッピング
+            dimensions_map = {
+                "amazon.titan-embed-text-v1": 1536,
+                "amazon.titan-embed-text-v2": 1024,
             }
             dimensions = dimensions_map.get(model, 1536)
         
@@ -3929,7 +4124,10 @@ async def save_embedding_settings(request: dict):
             model=model,
             api_base=api_base,
             dimensions=dimensions,
-            is_locked=is_locked
+            is_locked=is_locked,
+            aws_region_name=aws_region_name,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key
         )
         
         # 初回保存時は自動的にロック

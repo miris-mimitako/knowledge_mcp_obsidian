@@ -97,10 +97,22 @@ class SearchDatabase:
                 provider TEXT NOT NULL,
                 model TEXT,
                 api_base TEXT,
+                aws_region_name TEXT,
+                aws_access_key_id TEXT,
+                aws_secret_access_key TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # マイグレーション: AWS Bedrockカラムを追加（存在しない場合）
+        for column in ['aws_region_name', 'aws_access_key_id', 'aws_secret_access_key']:
+            try:
+                cursor.execute(f"ALTER TABLE llm_settings ADD COLUMN {column} TEXT")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                # カラムが既に存在する場合はエラーを無視
+                pass
         
         # Embedding設定テーブル
         cursor.execute("""
@@ -778,16 +790,22 @@ class SearchDatabase:
         setting_type: str = "rag",
         provider: str = "openrouter",
         model: Optional[str] = None,
-        api_base: Optional[str] = None
+        api_base: Optional[str] = None,
+        aws_region_name: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None
     ) -> bool:
         """
         LLM設定を保存
         
         Args:
             setting_type: 設定タイプ（"rag"など）
-            provider: プロバイダー（"openrouter"または"litellm"）
+            provider: プロバイダー（"openrouter", "litellm", "aws_bedrock"）
             model: モデル名
             api_base: APIベースURL（LiteLLMの場合）
+            aws_region_name: AWSリージョン名（AWS Bedrockの場合）
+            aws_access_key_id: AWSアクセスキーID（AWS Bedrockの場合）
+            aws_secret_access_key: AWSシークレットキー（AWS Bedrockの場合）
         
         Returns:
             成功した場合はTrue
@@ -795,9 +813,9 @@ class SearchDatabase:
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO llm_settings 
-            (setting_type, provider, model, api_base, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (setting_type, provider, model, api_base))
+            (setting_type, provider, model, api_base, aws_region_name, aws_access_key_id, aws_secret_access_key, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (setting_type, provider, model, api_base, aws_region_name, aws_access_key_id, aws_secret_access_key))
         self.conn.commit()
         return True
     
@@ -821,17 +839,23 @@ class SearchDatabase:
         model: str,
         api_base: Optional[str] = None,
         dimensions: int = 1536,
-        is_locked: bool = False
+        is_locked: bool = False,
+        aws_region_name: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None
     ) -> bool:
         """
         Embedding設定を保存
         
         Args:
-            provider: プロバイダー（"openrouter"または"litellm"）
+            provider: プロバイダー（"openrouter", "litellm", "aws_bedrock"）
             model: モデル名
             api_base: APIベースURL（LiteLLMの場合）
             dimensions: ベクトルの次元数
             is_locked: ロック状態（変更不可）
+            aws_region_name: AWSリージョン名（AWS Bedrockの場合）
+            aws_access_key_id: AWSアクセスキーID（AWS Bedrockの場合）
+            aws_secret_access_key: AWSシークレットキー（AWS Bedrockの場合）
         
         Returns:
             成功した場合はTrue
@@ -846,15 +870,16 @@ class SearchDatabase:
             cursor.execute("""
                 UPDATE embedding_settings 
                 SET provider = ?, model = ?, api_base = ?, dimensions = ?, 
-                    is_locked = ?, updated_at = CURRENT_TIMESTAMP
+                    is_locked = ?, aws_region_name = ?, aws_access_key_id = ?, aws_secret_access_key = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (provider, model, api_base, dimensions, is_locked, existing["id"]))
+            """, (provider, model, api_base, dimensions, is_locked, aws_region_name, aws_access_key_id, aws_secret_access_key, existing["id"]))
         else:
             cursor.execute("""
                 INSERT INTO embedding_settings 
-                (provider, model, api_base, dimensions, is_locked, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (provider, model, api_base, dimensions, is_locked))
+                (provider, model, api_base, dimensions, is_locked, aws_region_name, aws_access_key_id, aws_secret_access_key, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (provider, model, api_base, dimensions, is_locked, aws_region_name, aws_access_key_id, aws_secret_access_key))
         self.conn.commit()
         return True
     

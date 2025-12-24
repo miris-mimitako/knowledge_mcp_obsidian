@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>データベースサイズ - Knowledge MCP Obsidian</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .back-button {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .back-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateX(-3px);
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #4facfe;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #3d8bfe;
+        }
+        
+        .refresh-indicator {
+            display: inline-block;
+            margin-left: 10px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #4facfe;
+            transition: all 0.3s;
+        }
+        
+        .stat-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-card h3 {
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .stat-value {
+            color: #2c3e50;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .stat-value.size {
+            color: #4facfe;
+            font-size: 18px;
+        }
+        
+        .table-section {
+            margin-top: 30px;
+        }
+        
+        .table-section h3 {
+            font-size: 18px;
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        
+        .table-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .table-card table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .table-card th,
+        .table-card td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .table-card th {
+            background: #e9ecef;
+            color: #2c3e50;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .table-card td {
+            color: #34495e;
+            font-size: 14px;
+        }
+        
+        .table-card tr:hover {
+            background: #f0f0f0;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .loading-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        .error-message {
+            padding: 15px;
+            background: #fee;
+            border-left: 4px solid #e74c3c;
+            border-radius: 4px;
+            color: #c0392b;
+            margin-bottom: 20px;
+        }
+        
+        .path-text {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #7f8c8d;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/task/" class="back-button">← タスク管理に戻る</a>
+            <h1>💾 データベースサイズ管理</h1>
+            <p>データベースの保存サイズと統計情報を確認できます</p>
+        </div>
+        
+        <div class="content">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="refreshStats()">🔄 更新</button>
+                <span class="refresh-indicator" id="refreshIndicator"></span>
+            </div>
+            
+            <div id="errorContainer"></div>
+            
+            <div id="statsContainer">
+                <div class="loading">
+                    <div class="loading-icon">⏳</div>
+                    <p>データを読み込んでいます...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '/search';
+        
+        async function refreshStats() {
+            try {
+                const response = await fetch(`${API_BASE}/db/stats`);
+                if (!response.ok) throw new Error('データの取得に失敗しました');
+                
+                const data = await response.json();
+                displayStats(data);
+                updateRefreshIndicator();
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('errorContainer').innerHTML = `
+                    <div class="error-message">
+                        <strong>❌ エラー:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        function updateRefreshIndicator() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ja-JP');
+            document.getElementById('refreshIndicator').textContent = `最終更新: ${timeStr}`;
+        }
+        
+        function displayStats(data) {
+            const container = document.getElementById('statsContainer');
+            
+            const sqlite = data.sqlite;
+            const chromadb = data.chromadb;
+            const total = data.total;
+            
+            container.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>📊 合計サイズ</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">総サイズ</span>
+                            <span class="stat-value size">${total.size_formatted}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">バイト数</span>
+                            <span class="stat-value">${total.size_bytes.toLocaleString()} B</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <h3>🗄️ SQLite データベース</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">ファイルサイズ</span>
+                            <span class="stat-value size">${sqlite.size_formatted}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">実際のサイズ</span>
+                            <span class="stat-value">${sqlite.actual_size_formatted}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">パス</span>
+                            <span class="stat-value path-text">${sqlite.path}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <h3>🔮 ChromaDB ベクトルストア</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">ディレクトリサイズ</span>
+                            <span class="stat-value size">${chromadb.size_formatted}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">ファイル数</span>
+                            <span class="stat-value">${chromadb.file_count}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">パス</span>
+                            <span class="stat-value path-text">${chromadb.path}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="table-section">
+                    <h3>📋 SQLite テーブル統計</h3>
+                    <div class="table-card">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>テーブル名</th>
+                                    <th>レコード数</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>documents</td>
+                                    <td>${sqlite.tables.documents.toLocaleString()}</td>
+                                </tr>
+                                <tr>
+                                    <td>code_files</td>
+                                    <td>${sqlite.tables.code_files.toLocaleString()}</td>
+                                </tr>
+                                <tr>
+                                    <td>code_indices</td>
+                                    <td>${sqlite.tables.code_indices.toLocaleString()}</td>
+                                </tr>
+                                <tr>
+                                    <td>job_queue</td>
+                                    <td>${sqlite.tables.job_queue.toLocaleString()}</td>
+                                </tr>
+                                <tr>
+                                    <td>watched_directories</td>
+                                    <td>${sqlite.tables.watched_directories.toLocaleString()}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="table-section">
+                    <h3>🔮 ChromaDB コレクション統計</h3>
+                    <div class="table-card">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>項目</th>
+                                    <th>値</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>チャンク数</td>
+                                    <td>${chromadb.collection_stats.count ? chromadb.collection_stats.count.toLocaleString() : '0'}</td>
+                                </tr>
+                                <tr>
+                                    <td>一意のファイル数</td>
+                                    <td>${chromadb.collection_stats.unique_files ? chromadb.collection_stats.unique_files.toLocaleString() : '0'}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 初期化
+        refreshStats();
+    </script>
+</body>
+</html>
+
