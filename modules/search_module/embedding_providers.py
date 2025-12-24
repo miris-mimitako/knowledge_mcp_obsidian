@@ -187,7 +187,10 @@ class AWSBedrockEmbeddingProvider(EmbeddingProvider):
         AWS Bedrock Embeddingプロバイダーを初期化
         
         Args:
-            model_id: 使用するBedrockモデルID
+            model_id: 使用するBedrockモデルIDまたはARN
+                    - モデルID例: "amazon.titan-embed-text-v1"
+                    - ARN例: "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
+                    - 推論エンドポイントARN例: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-endpoint"
             region_name: AWSリージョン名
             aws_access_key_id: AWSアクセスキーID（環境変数から取得可能）
             aws_secret_access_key: AWSシークレットキー（環境変数から取得可能）

@@ -92,8 +92,11 @@ class VectorizeRequest(BaseModel):
     """ベクトル化リクエスト"""
     directory_path: str = Field(..., description="ベクトル化するディレクトリのパス")
     provider: Optional[str] = Field(default=None, description="Embeddingプロバイダー（openrouter, aws_bedrock, litellm）")
-    model: Optional[str] = Field(default=None, description="使用するモデル名（例: text-embedding-ada-002, gemini/text-embedding-004）")
+    model: Optional[str] = Field(default=None, description="使用するモデル名またはARN（ARNは推論エンドポイントの場合に使用）")
     api_base: Optional[str] = Field(default=None, description="LiteLLMのカスタムエンドポイントURL（litellmプロバイダーの場合のみ）")
+    aws_region_name: Optional[str] = Field(default=None, description="AWSリージョン名（aws_bedrockプロバイダーの場合のみ）")
+    aws_access_key_id: Optional[str] = Field(default=None, description="AWSアクセスキーID（aws_bedrockプロバイダーの場合のみ）")
+    aws_secret_access_key: Optional[str] = Field(default=None, description="AWSシークレットキー（aws_bedrockプロバイダーの場合のみ）")
     chunk_size: int = Field(default=512, description="チャンクサイズ（トークン数）")
     chunk_overlap: int = Field(default=50, description="オーバーラップサイズ（トークン数）")
     force_revectorize: bool = Field(default=False, description="強制再ベクトル化（更新日時チェックをスキップ）")
@@ -129,9 +132,12 @@ class RAGRequest(BaseModel):
     keyword_limit: int = Field(default=10, ge=1, le=50, description="各キーワードあたりの全文検索取得件数")
     vector_limit: int = Field(default=20, ge=1, le=100, description="ベクトル検索の取得件数")
     expand_synonyms: bool = Field(default=False, description="類義語展開を使用するかどうか")
-    llm_provider: Optional[str] = Field(default=None, description="LLMプロバイダー（openrouter, litellm）")
-    model: Optional[str] = Field(default=None, description="使用するLLMモデル名")
+    llm_provider: Optional[str] = Field(default=None, description="LLMプロバイダー（openrouter, litellm, aws_bedrock）")
+    model: Optional[str] = Field(default=None, description="使用するLLMモデル名またはARN（ARNは推論エンドポイントの場合に使用）")
     api_base: Optional[str] = Field(default=None, description="LiteLLMのカスタムエンドポイントURL（litellmプロバイダーの場合のみ）")
+    aws_region_name: Optional[str] = Field(default=None, description="AWSリージョン名（aws_bedrockプロバイダーの場合のみ）")
+    aws_access_key_id: Optional[str] = Field(default=None, description="AWSアクセスキーID（aws_bedrockプロバイダーの場合のみ）")
+    aws_secret_access_key: Optional[str] = Field(default=None, description="AWSシークレットキー（aws_bedrockプロバイダーの場合のみ）")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度パラメータ")
     max_tokens: Optional[int] = Field(default=None, ge=1, description="最大トークン数")
 
@@ -2600,6 +2606,9 @@ def process_vectorize_job(
     provider_type_str: Optional[str] = None,
     model: Optional[str] = None,
     api_base: Optional[str] = None,
+    aws_region_name: Optional[str] = None,
+    aws_access_key_id: Optional[str] = None,
+    aws_secret_access_key: Optional[str] = None,
     chunk_size: int = 512,
     chunk_overlap: int = 50,
     force_revectorize: bool = False
@@ -2611,8 +2620,11 @@ def process_vectorize_job(
         job_id: ジョブID
         directory_path: ベクトル化するディレクトリのパス
         provider_type_str: Embeddingプロバイダーのタイプ
-        model: 使用するモデル名（オプション）
+        model: 使用するモデル名またはARN（オプション）
         api_base: LiteLLMのカスタムエンドポイントURL（litellmプロバイダーの場合のみ）
+        aws_region_name: AWSリージョン名（aws_bedrockプロバイダーの場合のみ）
+        aws_access_key_id: AWSアクセスキーID（aws_bedrockプロバイダーの場合のみ）
+        aws_secret_access_key: AWSシークレットキー（aws_bedrockプロバイダーの場合のみ）
         chunk_size: チャンクサイズ
         chunk_overlap: オーバーラップサイズ
     """
@@ -2694,9 +2706,20 @@ def process_vectorize_job(
             # プロバイダー固有のパラメータを準備
             provider_kwargs = {}
             if model:
-                provider_kwargs["model"] = model
+                # AWS Bedrockの場合はmodel_id、その他はmodel
+                if provider_type == EmbeddingProviderType.AWS_BEDROCK:
+                    provider_kwargs["model_id"] = model
+                else:
+                    provider_kwargs["model"] = model
             if provider_type == EmbeddingProviderType.LITELLM and api_base:
                 provider_kwargs["api_base"] = api_base
+            if provider_type == EmbeddingProviderType.AWS_BEDROCK:
+                if aws_region_name:
+                    provider_kwargs["region_name"] = aws_region_name
+                if aws_access_key_id:
+                    provider_kwargs["aws_access_key_id"] = aws_access_key_id
+                if aws_secret_access_key:
+                    provider_kwargs["aws_secret_access_key"] = aws_secret_access_key
             
             embedding_provider = create_embedding_provider(provider_type, **provider_kwargs)
         except ValueError as e:
@@ -2838,6 +2861,9 @@ async def vectorize_directory(request: VectorizeRequest):
                 "provider": request.provider,
                 "model": request.model,
                 "api_base": request.api_base,
+                "aws_region_name": request.aws_region_name,
+                "aws_access_key_id": request.aws_access_key_id,
+                "aws_secret_access_key": request.aws_secret_access_key,
                 "chunk_size": request.chunk_size,
                 "chunk_overlap": request.chunk_overlap,
                 "force_revectorize": request.force_revectorize
@@ -2859,6 +2885,9 @@ async def vectorize_directory(request: VectorizeRequest):
                 request.provider,
                 request.model,
                 request.api_base,
+                request.aws_region_name,
+                request.aws_access_key_id,
+                request.aws_secret_access_key,
                 request.chunk_size,
                 request.chunk_overlap,
                 request.force_revectorize
@@ -3917,11 +3946,25 @@ async def rag_query(request: RAGRequest):
         
         # 5. LLMプロバイダーを作成
         try:
-            llm_provider = create_llm_provider(
-                provider_type=provider_type,
-                model=request.model,
-                api_base=request.api_base
-            )
+            llm_provider_kwargs = {
+                "provider_type": provider_type,
+                "model": request.model,
+            }
+            
+            # LiteLLMプロバイダーの場合
+            if provider_type == LLMProviderType.LITELLM and request.api_base:
+                llm_provider_kwargs["api_base"] = request.api_base
+            
+            # AWS Bedrockプロバイダーの場合
+            if provider_type == LLMProviderType.AWS_BEDROCK:
+                if request.aws_region_name:
+                    llm_provider_kwargs["region_name"] = request.aws_region_name
+                if request.aws_access_key_id:
+                    llm_provider_kwargs["aws_access_key_id"] = request.aws_access_key_id
+                if request.aws_secret_access_key:
+                    llm_provider_kwargs["aws_secret_access_key"] = request.aws_secret_access_key
+            
+            llm_provider = create_llm_provider(**llm_provider_kwargs)
         except Exception as e:
             raise HTTPException(
                 status_code=500,
@@ -3979,6 +4022,9 @@ async def rag_query_get(
     llm_provider: Optional[str] = None,
     model: Optional[str] = None,
     api_base: Optional[str] = None,
+    aws_region_name: Optional[str] = None,
+    aws_access_key_id: Optional[str] = None,
+    aws_secret_access_key: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: Optional[int] = None
 ):
@@ -3992,9 +4038,12 @@ async def rag_query_get(
         keyword_limit: 各キーワードあたりの全文検索取得件数
         vector_limit: ベクトル検索の取得件数
         expand_synonyms: 類義語展開を使用するかどうか
-        llm_provider: LLMプロバイダー（openrouter, litellm）
-        model: 使用するLLMモデル名
+        llm_provider: LLMプロバイダー（openrouter, litellm, aws_bedrock）
+        model: 使用するLLMモデル名またはARN（ARNは推論エンドポイントの場合に使用）
         api_base: LiteLLMのカスタムエンドポイントURL
+        aws_region_name: AWSリージョン名（aws_bedrockプロバイダーの場合のみ）
+        aws_access_key_id: AWSアクセスキーID（aws_bedrockプロバイダーの場合のみ）
+        aws_secret_access_key: AWSシークレットキー（aws_bedrockプロバイダーの場合のみ）
         temperature: 温度パラメータ
         max_tokens: 最大トークン数
     
@@ -4011,6 +4060,9 @@ async def rag_query_get(
         llm_provider=llm_provider,
         model=model,
         api_base=api_base,
+        aws_region_name=aws_region_name,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
         temperature=temperature,
         max_tokens=max_tokens
     )
