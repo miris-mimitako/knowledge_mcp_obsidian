@@ -12,7 +12,7 @@ class TextChunker:
     
     def __init__(
         self,
-        chunk_size: int = 512,
+        chunk_size: int = 1024,
         chunk_overlap: int = 50,
         tokenizer: JapaneseTokenizer = None
     ):

@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional, Callable
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel, Field
 
 from .database import SearchDatabase
@@ -97,7 +97,7 @@ class VectorizeRequest(BaseModel):
     aws_region_name: Optional[str] = Field(default=None, description="AWSリージョン名（aws_bedrockプロバイダーの場合のみ）")
     aws_access_key_id: Optional[str] = Field(default=None, description="AWSアクセスキーID（aws_bedrockプロバイダーの場合のみ）")
     aws_secret_access_key: Optional[str] = Field(default=None, description="AWSシークレットキー（aws_bedrockプロバイダーの場合のみ）")
-    chunk_size: int = Field(default=512, description="チャンクサイズ（トークン数）")
+    chunk_size: int = Field(default=1024, description="チャンクサイズ（トークン数）")
     chunk_overlap: int = Field(default=50, description="オーバーラップサイズ（トークン数）")
     force_revectorize: bool = Field(default=False, description="強制再ベクトル化（更新日時チェックをスキップ）")
 
@@ -185,7 +185,7 @@ def get_vectorizer() -> DocumentVectorizer:
         
         # チャンカーを作成
         chunker = TextChunker(
-            chunk_size=512,
+            chunk_size=1024,
             chunk_overlap=50,
             tokenizer=tokenizer
         )
@@ -733,6 +733,171 @@ async def create_index(request: IndexRequest):
         raise HTTPException(status_code=500, detail=f"インデックス作成ジョブの作成中にエラーが発生しました: {str(e)}")
 
 
+@router.get("/file-content")
+async def get_file_content(file_path: str):
+    """
+    ファイルの内容を取得
+    
+    Args:
+        file_path: ファイルパス（URLエンコード済み）
+    
+    Returns:
+        ファイルの内容とメタデータ
+    """
+    if not file_path:
+        raise HTTPException(status_code=400, detail="ファイルパスが指定されていません")
+    
+    # URLデコード（FastAPIは自動的にデコードするが、念のため）
+    import urllib.parse
+    # バックスラッシュが失われている可能性があるため、スラッシュをバックスラッシュに変換
+    # Windowsパスの場合、URLエンコード時にバックスラッシュが失われる可能性がある
+    decoded_path = urllib.parse.unquote(file_path)
+    # スラッシュをバックスラッシュに変換（Windowsパスの場合）
+    if os.name == 'nt':  # Windows
+        decoded_path = decoded_path.replace('/', '\\')
+    
+    # ファイルパスの安全性チェック
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail=f"ファイルが見つかりません: {decoded_path}")
+    
+    try:
+        file_path_obj = Path(decoded_path)
+        ext = file_path_obj.suffix.lower()
+        
+        # PDFファイルの場合
+        if ext == '.pdf':
+            # URLエンコード（バックスラッシュをスラッシュに変換してからエンコード）
+            encoded_path = urllib.parse.quote(decoded_path.replace('\\', '/'), safe='')
+            return {
+                "file_path": decoded_path,
+                "file_type": "pdf",
+                "content": None,  # PDFは埋め込み表示のため、内容は不要
+                "can_embed": True,
+                "file_url": f"/search/file?file_path={encoded_path}"
+            }
+        
+        # コードファイルの場合
+        code_extensions = {'.py', '.ts', '.tsx', '.js', '.jsx', '.java', '.cpp', '.c', '.h', '.hpp', 
+                          '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.r', 
+                          '.m', '.mm', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+                          '.json', '.xml', '.html', '.css', '.yaml', '.yml'}
+        if ext in code_extensions:
+            # コードファイルとして読み込み
+            content = ""
+            encodings = ['utf-8', 'shift-jis', 'cp932', 'euc-jp', 'iso-2022-jp']
+            for encoding in encodings:
+                try:
+                    with open(decoded_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            
+            if not content:
+                try:
+                    with open(decoded_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                except Exception:
+                    raise HTTPException(status_code=500, detail="ファイルの読み込みに失敗しました")
+            
+            # 言語を判定
+            language_map = {
+                '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+                '.jsx': 'javascript', '.tsx': 'typescript', '.java': 'java',
+                '.cpp': 'cpp', '.c': 'c', '.h': 'c', '.hpp': 'cpp',
+                '.cs': 'csharp', '.go': 'go', '.rs': 'rust', '.rb': 'ruby',
+                '.php': 'php', '.swift': 'swift', '.kt': 'kotlin', '.scala': 'scala',
+                '.r': 'r', '.m': 'objective-c', '.mm': 'objective-cpp',
+                '.sh': 'bash', '.bash': 'bash', '.zsh': 'zsh', '.fish': 'fish',
+                '.ps1': 'powershell', '.bat': 'batch', '.cmd': 'batch',
+                '.json': 'json', '.xml': 'xml', '.html': 'html', '.css': 'css',
+                '.yaml': 'yaml', '.yml': 'yaml'
+            }
+            language = language_map.get(ext, 'text')
+            
+            return {
+                "file_path": decoded_path,
+                "file_type": "code",
+                "language": language,
+                "content": content,
+                "can_embed": False
+            }
+        
+        # Markdownファイルの場合
+        if ext in {'.md', '.markdown'}:
+            parser = get_parser(decoded_path)
+            if parser:
+                parsed = parser.parse(decoded_path)
+                content = parsed[0]['content'] if parsed else ""
+                return {
+                    "file_path": decoded_path,
+                    "file_type": "markdown",
+                    "content": content,
+                    "can_embed": False
+                }
+        
+        # テキストファイルの場合
+        if ext == '.txt':
+            parser = get_parser(decoded_path)
+            if parser:
+                parsed = parser.parse(decoded_path)
+                content = parsed[0]['content'] if parsed else ""
+                return {
+                    "file_path": decoded_path,
+                    "file_type": "text",
+                    "content": content,
+                    "can_embed": False
+                }
+        
+        # その他のファイルタイプ
+        raise HTTPException(status_code=400, detail=f"サポートされていないファイルタイプ: {ext}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ファイルの読み込み中にエラーが発生しました: {str(e)}")
+
+
+@router.get("/file")
+async def serve_file(file_path: str):
+    """
+    ファイルを直接返す（PDFなど埋め込み表示用）
+    
+    Args:
+        file_path: ファイルパス（URLエンコード済み）
+    
+    Returns:
+        ファイルの内容
+    """
+    if not file_path:
+        raise HTTPException(status_code=400, detail="ファイルパスが指定されていません")
+    
+    # URLデコード
+    import urllib.parse
+    decoded_path = urllib.parse.unquote(file_path)
+    # スラッシュをバックスラッシュに変換（Windowsパスの場合）
+    if os.name == 'nt':  # Windows
+        decoded_path = decoded_path.replace('/', '\\')
+    
+    # ファイルパスの安全性チェック
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail=f"ファイルが見つかりません: {decoded_path}")
+    
+    file_path_obj = Path(decoded_path)
+    ext = file_path_obj.suffix.lower()
+    
+    # PDFファイルの場合
+    if ext == '.pdf':
+        return FileResponse(
+            decoded_path,
+            media_type='application/pdf',
+            filename=file_path_obj.name
+        )
+    
+    # その他のファイルタイプはエラー
+    raise HTTPException(status_code=400, detail=f"サポートされていないファイルタイプ: {ext}")
+
+
 @router.get("/query", response_model=SearchResponse)
 async def search(query: str, limit: int = 50):
     """
@@ -1023,6 +1188,15 @@ task_router = APIRouter(
 )
 
 
+@task_router.get("/search", response_class=HTMLResponse)
+async def search_page():
+    """
+    キーワード検索ページを表示
+    """
+    html_content = load_html_template("search.html")
+    return HTMLResponse(content=html_content, status_code=200)
+
+
 @task_router.get("/", response_class=HTMLResponse)
 async def task_index():
     """
@@ -1109,6 +1283,11 @@ async def task_index():
                 <h2>監視対象ディレクトリ</h2>
                 <p>監視対象ディレクトリを設定し、変更を自動的にインデックスに反映します。</p>
                 <a href="/task/target_index_lists">監視対象ディレクトリ管理ページへ</a>
+            </div>
+            <div class="task-card">
+                <h2>🔍 キーワード検索</h2>
+                <p>インデックスされたドキュメントからキーワードを検索し、ファイル内容を表示します。</p>
+                <a href="/task/search">キーワード検索ページへ</a>
             </div>
             <div class="task-card">
                 <h2>RAG質問応答</h2>
@@ -1977,7 +2156,7 @@ async def target_index_lists_page():
                             headers: {{ 'Content-Type': 'application/json' }},
                             body: JSON.stringify({{
                                 directory_path: directoryPath,
-                                chunk_size: 512,
+                                chunk_size: 1024,
                                 chunk_overlap: 50,
                                 force_revectorize: forceRevectorize
                             }})
@@ -2609,7 +2788,7 @@ def process_vectorize_job(
     aws_region_name: Optional[str] = None,
     aws_access_key_id: Optional[str] = None,
     aws_secret_access_key: Optional[str] = None,
-    chunk_size: int = 512,
+    chunk_size: int = 1024,
     chunk_overlap: int = 50,
     force_revectorize: bool = False
 ):

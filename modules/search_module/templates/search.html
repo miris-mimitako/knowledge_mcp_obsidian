@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>キーワード検索 - Knowledge MCP Obsidian</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 40px);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .content {
+            padding: 30px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .search-form {
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+        
+        .search-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .search-input {
+            flex: 1;
+            padding: 12px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .search-options {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .search-options label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .search-options input[type="number"] {
+            width: 80px;
+            padding: 6px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .two-column-layout {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .left-panel {
+            flex: 0 0 40%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 2px solid #f0f0f0;
+            padding-right: 20px;
+        }
+        
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            flex-shrink: 0;
+        }
+        
+        .results-count {
+            font-size: 16px;
+            color: #555;
+        }
+        
+        .results-count strong {
+            color: #667eea;
+            font-size: 18px;
+        }
+        
+        .results-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        
+        .result-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .result-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+        
+        .result-card.active {
+            background: #e8f0fe;
+            border-left-color: #667eea;
+            border-left-width: 6px;
+        }
+        
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .result-file-path {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2c3e50;
+            word-break: break-all;
+        }
+        
+        .result-file-type {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #e0e0e0;
+            color: #555;
+        }
+        
+        .result-location {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+        
+        .result-snippet {
+            color: #34495e;
+            line-height: 1.5;
+            font-size: 13px;
+            max-height: 60px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .result-snippet .highlight {
+            background: #fff3cd;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+        
+        .file-viewer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .file-viewer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+            flex-shrink: 0;
+        }
+        
+        .file-viewer-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            word-break: break-all;
+        }
+        
+        .file-viewer-content {
+            flex: 1;
+            overflow-y: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            line-height: 1.6;
+        }
+        
+        .file-viewer-content pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 14px;
+        }
+        
+        .file-viewer-content code {
+            font-family: 'Courier New', monospace;
+        }
+        
+        .file-viewer-content pre code {
+            display: block;
+        }
+        
+        .file-viewer-content p {
+            margin-bottom: 10px;
+        }
+        
+        .file-viewer-content h1,
+        .file-viewer-content h2,
+        .file-viewer-content h3 {
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .file-viewer-content img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .file-viewer-content iframe {
+            width: 100%;
+            height: 800px;
+            border: none;
+            border-radius: 6px;
+        }
+        
+        .pdf-viewer-container {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            background: #525252;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .pdf-controls {
+            position: sticky;
+            top: 0;
+            background: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 10;
+            border-radius: 6px 6px 0 0;
+            flex-wrap: wrap;
+        }
+        
+        .pdf-controls button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .pdf-controls button:hover {
+            background: #5568d3;
+        }
+        
+        .pdf-controls button.btn-large {
+            background: #27ae60;
+            font-size: 16px;
+            padding: 10px 20px;
+        }
+        
+        .pdf-controls button.btn-large:hover {
+            background: #229954;
+        }
+        
+        .pdf-controls button.btn-new-tab {
+            background: #e67e22;
+        }
+        
+        .pdf-controls button.btn-new-tab:hover {
+            background: #d35400;
+        }
+        
+        .pdf-pages-container {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .pdf-page-wrapper {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+            position: relative;
+        }
+        
+        .pdf-page-canvas-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .pdf-viewer-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        
+        .pdf-text-layer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            opacity: 0;
+            line-height: 1.0;
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+        }
+        
+        .pdf-text-layer > span {
+            color: transparent;
+            position: absolute;
+            white-space: pre;
+            cursor: text;
+            transform-origin: 0% 0%;
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+        }
+        
+        .pdf-text-layer ::selection {
+            background: rgba(0, 123, 255, 0.3);
+            color: transparent;
+        }
+        
+        .pdf-text-layer ::-moz-selection {
+            background: rgba(0, 123, 255, 0.3);
+            color: transparent;
+        }
+        
+        .pdf-page-number {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        
+        /* モーダルスタイル */
+        .pdf-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.9);
+            overflow: auto;
+        }
+        
+        .pdf-modal-content {
+            position: relative;
+            margin: 20px auto;
+            width: 95%;
+            max-width: 1400px;
+            background: #2c3e50;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .pdf-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            color: white;
+        }
+        
+        .pdf-modal-close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            background: #e74c3c;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+        
+        .pdf-modal-close:hover {
+            background: #c0392b;
+        }
+        
+        .pdf-modal-viewer {
+            background: #525252;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: calc(100vh - 150px);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            padding: 15px;
+            background: #fee;
+            border-left: 4px solid #e74c3c;
+            border-radius: 4px;
+            color: #c0392b;
+            margin-bottom: 20px;
+        }
+        
+        .nav-links {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 14px;
+        }
+        
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 キーワード検索</h1>
+            <p>インデックスされたドキュメントからキーワードを検索できます</p>
+        </div>
+        
+        <div class="content">
+            <form class="search-form" id="searchForm" onsubmit="performSearch(event)">
+                <div class="search-input-group">
+                    <input 
+                        type="text" 
+                        id="searchQuery" 
+                        class="search-input" 
+                        placeholder="検索キーワードを入力してください..."
+                        autocomplete="off"
+                        required
+                    >
+                    <button type="submit" class="btn btn-primary" id="searchBtn">
+                        🔍 検索
+                    </button>
+                </div>
+                <div class="search-options">
+                    <label>
+                        最大結果数:
+                        <input type="number" id="limit" value="50" min="1" max="100">
+                    </label>
+                </div>
+            </form>
+            
+            <div id="errorContainer"></div>
+            
+            <div class="two-column-layout" id="twoColumnLayout" style="display: none;">
+                <div class="left-panel">
+                    <div class="results-header">
+                        <div class="results-count" id="resultsCount">
+                            検索結果: <strong>0</strong> 件
+                        </div>
+                    </div>
+                    <div class="results-list" id="resultsList">
+                    </div>
+                </div>
+                <div class="right-panel">
+                    <div class="file-viewer" id="fileViewer">
+                        <div class="file-viewer-header">
+                            <div class="file-viewer-title" id="fileViewerTitle">
+                                ファイルを選択してください
+                            </div>
+                        </div>
+                        <div class="file-viewer-content" id="fileViewerContent">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">📄</div>
+                                <p>左側の検索結果からファイルを選択すると、ここに内容が表示されます</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="resultsContainer">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <p>検索キーワードを入力して検索を開始してください</p>
+                </div>
+            </div>
+            
+            <div class="nav-links">
+                <a href="/task/">タスク管理</a>
+                <a href="/task/create_index">インデックス作成</a>
+                <a href="/task/create_vector">ベクトル化</a>
+                <a href="/task/rag">RAG検索</a>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '/search';
+        let currentFile = null;
+        
+        // Enterキーで検索
+        document.getElementById('searchQuery').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                performSearch(e);
+            }
+        });
+        
+        // URLパラメータから検索クエリを取得
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryParam = urlParams.get('q');
+        if (queryParam) {
+            document.getElementById('searchQuery').value = queryParam;
+            performSearch(null);
+        }
+        
+        async function performSearch(event) {
+            if (event) {
+                event.preventDefault();
+            }
+            
+            const query = document.getElementById('searchQuery').value.trim();
+            const limit = parseInt(document.getElementById('limit').value) || 50;
+            
+            if (!query) {
+                showError('検索キーワードを入力してください');
+                return;
+            }
+            
+            // 検索ボタンを無効化
+            const searchBtn = document.getElementById('searchBtn');
+            searchBtn.disabled = true;
+            searchBtn.textContent = '検索中...';
+            
+            // エラーをクリア
+            document.getElementById('errorContainer').innerHTML = '';
+            
+            // ローディング表示
+            document.getElementById('resultsContainer').innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>検索中...</p>
+                </div>
+            `;
+            document.getElementById('twoColumnLayout').style.display = 'none';
+            
+            try {
+                // URLを更新（履歴に追加）
+                const newUrl = `${window.location.pathname}?q=${encodeURIComponent(query)}&limit=${limit}`;
+                window.history.pushState({}, '', newUrl);
+                
+                const response = await fetch(`${API_BASE}/query?query=${encodeURIComponent(query)}&limit=${limit}`);
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '検索に失敗しました');
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showError(`エラー: ${error.message}`);
+                document.getElementById('resultsContainer').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <p>検索中にエラーが発生しました</p>
+                    </div>
+                `;
+            } finally {
+                // 検索ボタンを再有効化
+                searchBtn.disabled = false;
+                searchBtn.textContent = '🔍 検索';
+            }
+        }
+        
+        function displayResults(data) {
+            const container = document.getElementById('resultsContainer');
+            const twoColumnLayout = document.getElementById('twoColumnLayout');
+            const resultsList = document.getElementById('resultsList');
+            const resultsCount = document.getElementById('resultsCount');
+            
+            if (!data.results || data.results.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>検索結果が見つかりませんでした</p>
+                        <p style="margin-top: 10px; font-size: 14px;">別のキーワードで検索してみてください</p>
+                    </div>
+                `;
+                twoColumnLayout.style.display = 'none';
+                return;
+            }
+            
+            // 2カラムレイアウトを表示
+            container.style.display = 'none';
+            twoColumnLayout.style.display = 'flex';
+            
+            // 結果数を更新
+            resultsCount.innerHTML = `検索結果: <strong>${data.total}</strong> 件`;
+            
+            // 検索結果を表示
+            const query = document.getElementById('searchQuery').value.trim();
+            let html = '';
+            
+            data.results.forEach((result, index) => {
+                const fileType = result.file_type || '不明';
+                const locationInfo = result.location_info || '';
+                const snippet = escapeHtml(result.snippet || '');
+                const highlightedSnippet = highlightKeywords(snippet, query);
+                // ファイルパスを安全にエスケープ（HTML属性用）
+                const safeFilePath = result.file_path.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                // location_infoからページ番号を抽出（PDFの場合）
+                let pageNumber = null;
+                if (locationInfo && fileType.toLowerCase() === 'pdf') {
+                    const pageMatch = locationInfo.match(/page\s+(\d+)/i);
+                    if (pageMatch) {
+                        pageNumber = parseInt(pageMatch[1]) - 1; // PDF.jsは0ベース
+                    }
+                }
+                const pageAttr = pageNumber !== null ? `data-page-number="${pageNumber}"` : '';
+                
+                html += `
+                    <div class="result-card" data-file-path="${escapeHtml(result.file_path)}" data-location-info="${escapeHtml(locationInfo)}" ${pageAttr} onclick="selectFileFromData(this)">
+                        <div class="result-header">
+                            <div class="result-file-path">
+                                📄 ${escapeHtml(result.file_path)}
+                            </div>
+                            <span class="result-file-type">${fileType}</span>
+                        </div>
+                        ${locationInfo ? `<div class="result-location">📍 ${escapeHtml(locationInfo)}</div>` : ''}
+                        <div class="result-snippet">${highlightedSnippet}</div>
+                    </div>
+                `;
+            });
+            
+            resultsList.innerHTML = html;
+            
+            // 最初のファイルを自動選択
+            if (data.results.length > 0) {
+                const firstResult = data.results[0];
+                const firstCard = resultsList.querySelector('.result-card');
+                if (firstCard) {
+                    // 最初の結果のページ番号を取得
+                    let pageNumber = null;
+                    if (firstResult.location_info && firstResult.file_type && firstResult.file_type.toLowerCase() === 'pdf') {
+                        const pageMatch = firstResult.location_info.match(/page\s+(\d+)/i);
+                        if (pageMatch) {
+                            pageNumber = parseInt(pageMatch[1]) - 1; // PDF.jsは0ベース
+                        }
+                    }
+                    selectFile(firstResult.file_path, firstCard, firstResult.location_info || '', pageNumber);
+                }
+            }
+        }
+        
+        function selectFileFromData(cardElement) {
+            // data-file-path属性からファイルパスを取得
+            const filePath = cardElement.getAttribute('data-file-path');
+            const locationInfo = cardElement.getAttribute('data-location-info') || '';
+            const pageNumber = cardElement.getAttribute('data-page-number');
+            if (filePath) {
+                selectFile(filePath, cardElement, locationInfo, pageNumber);
+            }
+        }
+        
+        async function selectFile(filePath, cardElement, locationInfo = '', pageNumber = null) {
+            // アクティブなカードのスタイルを更新
+            document.querySelectorAll('.result-card').forEach(card => {
+                card.classList.remove('active');
+            });
+            if (cardElement) {
+                cardElement.classList.add('active');
+            }
+            
+            currentFile = filePath;
+            
+            // ファイルビューアーを更新
+            const fileViewerTitle = document.getElementById('fileViewerTitle');
+            const fileViewerContent = document.getElementById('fileViewerContent');
+            
+            fileViewerTitle.textContent = '読み込み中...';
+            fileViewerContent.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>ファイルを読み込んでいます...</p>
+                </div>
+            `;
+            
+            try {
+                // ファイルパスを正しくエンコード（バックスラッシュを保持）
+                // Windowsパスの場合、バックスラッシュをスラッシュに変換してからエンコード
+                let encodedPath = filePath.replace(/\\/g, '/');
+                encodedPath = encodeURIComponent(encodedPath);
+                const response = await fetch(`${API_BASE}/file-content?file_path=${encodedPath}`);
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'ファイルの読み込みに失敗しました');
+                }
+                
+                const data = await response.json();
+                // APIレスポンスから取得したファイルパスを使用（正しいパスが保証される）
+                fileViewerTitle.textContent = data.file_path || filePath;
+                
+                // ファイルタイプに応じて表示
+                if (data.file_type === 'pdf') {
+                    // PDF.jsを使用してPDFを表示（全ページスクロール表示）
+                    await displayPDFAllPages(data.file_url, fileViewerContent, pageNumber, locationInfo);
+                } else if (data.file_type === 'code') {
+                    // コードをコードブロックで表示
+                    const codeContent = escapeHtml(data.content);
+                    fileViewerContent.innerHTML = `
+                        <pre><code class="language-${data.language}">${codeContent}</code></pre>
+                    `;
+                    // シンタックスハイライトを適用
+                    hljs.highlightAll();
+                } else if (data.file_type === 'markdown') {
+                    // Markdownをパーサーで表示
+                    if (typeof marked !== 'undefined') {
+                        const htmlContent = marked.parse(data.content);
+                        fileViewerContent.innerHTML = htmlContent;
+                    } else {
+                        // marked.jsが読み込まれていない場合はプレーンテキスト
+                        fileViewerContent.innerHTML = `<pre>${escapeHtml(data.content)}</pre>`;
+                    }
+                } else if (data.file_type === 'text') {
+                    // テキストファイルをそのまま表示
+                    fileViewerContent.innerHTML = `<pre style="white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(data.content)}</pre>`;
+                } else {
+                    fileViewerContent.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">❓</div>
+                            <p>サポートされていないファイルタイプです</p>
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                fileViewerTitle.textContent = 'エラー';
+                fileViewerContent.innerHTML = `
+                    <div class="error-message">
+                        <strong>❌ エラー:</strong> ${escapeHtml(error.message)}
+                    </div>
+                `;
+            }
+        }
+        
+        async function displayPDFAllPages(fileUrl, container, initialPage = null, locationInfo = '') {
+            // PDF.jsのワーカーを設定
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            
+            try {
+                // PDFを読み込む
+                const loadingTask = pdfjsLib.getDocument(fileUrl);
+                const pdf = await loadingTask.promise;
+                const totalPages = pdf.numPages;
+                
+                // 初期ページを設定（指定がない場合は1ページ目）
+                let targetPage = initialPage !== null ? parseInt(initialPage) + 1 : 1;
+                if (targetPage < 1) targetPage = 1;
+                if (targetPage > totalPages) targetPage = totalPages;
+                
+                // PDFビューアーのHTMLを作成
+                const viewerId = 'pdf-viewer-' + Date.now();
+                const initialPageForModal = initialPage !== null ? parseInt(initialPage) + 1 : 1;
+                container.innerHTML = `
+                    <div class="pdf-viewer-container" id="${viewerId}">
+                        <div class="pdf-controls">
+                            <button class="btn-large" onclick="openPDFModal('${viewerId}', '${fileUrl}', ${initialPageForModal})">📄 大きなサイズで表示</button>
+                            <button class="btn-new-tab" onclick="openPDFInNewTab('${fileUrl}')">🔗 別ページ表示</button>
+                            <span style="margin-left: auto; color: #aaa;">全 ${totalPages} ページ</span>
+                        </div>
+                        <div class="pdf-pages-container" id="${viewerId}-pages">
+                            <div class="loading">
+                                <div class="loading-spinner"></div>
+                                <p>PDFを読み込んでいます...</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // グローバル変数にPDFとファイルURL、初期ページを保存
+                window[viewerId + '_pdf'] = pdf;
+                window[viewerId + '_fileUrl'] = fileUrl;
+                window[viewerId + '_initialPage'] = initialPageForModal;
+                
+                // 全ページをレンダリング
+                const pagesContainer = document.getElementById(viewerId + '-pages');
+                pagesContainer.innerHTML = '';
+                
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    await renderPDFPageForScroll(viewerId, pageNum, pagesContainer);
+                }
+                
+                // 指定されたページまでスクロール
+                if (targetPage > 0) {
+                    setTimeout(() => {
+                        const targetElement = document.getElementById(`${viewerId}-page-${targetPage}`);
+                        if (targetElement) {
+                            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }, 500);
+                }
+                
+            } catch (error) {
+                console.error('PDF読み込みエラー:', error);
+                container.innerHTML = `
+                    <div class="error-message">
+                        <strong>❌ PDFの読み込みに失敗しました:</strong> ${escapeHtml(error.message)}
+                    </div>
+                `;
+            }
+        }
+        
+        async function renderPDFPageForScroll(viewerId, pageNum, container) {
+            const pdf = window[viewerId + '_pdf'];
+            const scale = 1.5; // デフォルトのスケール
+            
+            try {
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: scale });
+                
+                const canvas = document.createElement('canvas');
+                canvas.className = 'pdf-viewer-canvas';
+                canvas.id = `${viewerId}-canvas-${pageNum}`;
+                const context = canvas.getContext('2d');
+                
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                await page.render(renderContext).promise;
+                
+                // ページラッパーを作成
+                const pageWrapper = document.createElement('div');
+                pageWrapper.className = 'pdf-page-wrapper';
+                pageWrapper.id = `${viewerId}-page-${pageNum}`;
+                
+                // ページ番号を表示
+                const pageNumber = document.createElement('div');
+                pageNumber.className = 'pdf-page-number';
+                pageNumber.textContent = `ページ ${pageNum}`;
+                pageWrapper.appendChild(pageNumber);
+                
+                // Canvasコンテナを作成
+                const canvasContainer = document.createElement('div');
+                canvasContainer.className = 'pdf-page-canvas-container';
+                canvasContainer.style.width = viewport.width + 'px';
+                canvasContainer.style.height = viewport.height + 'px';
+                
+                canvasContainer.appendChild(canvas);
+                
+                // テキストレイヤーを追加
+                const textLayer = await createTextLayer(page, viewport);
+                canvasContainer.appendChild(textLayer);
+                
+                pageWrapper.appendChild(canvasContainer);
+                container.appendChild(pageWrapper);
+                
+            } catch (error) {
+                console.error(`PDFページ ${pageNum} のレンダリングエラー:`, error);
+            }
+        }
+        
+        async function createTextLayer(page, viewport) {
+            const textContent = await page.getTextContent();
+            const textLayerDiv = document.createElement('div');
+            textLayerDiv.className = 'pdf-text-layer';
+            textLayerDiv.style.width = viewport.width + 'px';
+            textLayerDiv.style.height = viewport.height + 'px';
+            
+            // テキストアイテムを配置
+            const textItems = textContent.items;
+            for (let i = 0; i < textItems.length; i++) {
+                const item = textItems[i];
+                const tx = item.transform;
+                
+                // テキストの位置とサイズを計算
+                const span = document.createElement('span');
+                span.textContent = item.str;
+                
+                // PDF.jsの座標系（左下が原点）をCSS座標系（左上が原点）に変換
+                // transform配列: [a, b, c, d, e, f]
+                // e = x座標, f = y座標（PDF座標系）
+                const x = tx[4];
+                const y = viewport.height - tx[5]; // Y座標を反転
+                
+                // テキストの幅と高さを計算
+                const fontSize = Math.abs(tx[0]) || item.height || 12;
+                const textWidth = item.width || (item.str.length * fontSize * 0.6);
+                const textHeight = item.height || fontSize;
+                
+                span.style.left = x + 'px';
+                span.style.top = (y - textHeight) + 'px';
+                span.style.fontSize = fontSize + 'px';
+                span.style.fontFamily = item.fontName || 'sans-serif';
+                span.style.width = textWidth + 'px';
+                span.style.height = textHeight + 'px';
+                span.style.display = 'inline-block';
+                
+                textLayerDiv.appendChild(span);
+            }
+            
+            return textLayerDiv;
+        }
+        
+        function openPDFModal(viewerId, fileUrl, initialPage = 1) {
+            const pdf = window[viewerId + '_pdf'];
+            if (!pdf) return;
+            
+            // モーダルを作成
+            const modalId = 'pdf-modal-' + Date.now();
+            const modal = document.createElement('div');
+            modal.className = 'pdf-modal';
+            modal.id = modalId;
+            
+            const filePath = document.getElementById('fileViewerTitle').textContent;
+            
+            modal.innerHTML = `
+                <div class="pdf-modal-content" onclick="event.stopPropagation()">
+                    <div class="pdf-modal-header">
+                        <h2 style="margin: 0; color: white;">${escapeHtml(filePath)}</h2>
+                        <span class="pdf-modal-close" onclick="closePDFModal('${modalId}')">&times;</span>
+                    </div>
+                    <div class="pdf-modal-viewer" id="${modalId}-viewer">
+                        <div class="loading">
+                            <div class="loading-spinner"></div>
+                            <p>PDFを読み込んでいます...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 背景クリックで閉じる
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    closePDFModal(modalId);
+                }
+            };
+            
+            document.body.appendChild(modal);
+            modal.style.display = 'block';
+            
+            // モーダル内にPDFを表示（初期ページを指定）
+            displayPDFInModal(modalId, fileUrl, pdf, initialPage);
+            
+            // ESCキーで閉じる
+            const closeOnEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closePDFModal(modalId);
+                    document.removeEventListener('keydown', closeOnEscape);
+                }
+            };
+            document.addEventListener('keydown', closeOnEscape);
+        }
+        
+        async function displayPDFInModal(modalId, fileUrl, pdf, initialPage = 1) {
+            const viewer = document.getElementById(modalId + '-viewer');
+            const pagesContainer = document.createElement('div');
+            pagesContainer.className = 'pdf-pages-container';
+            pagesContainer.style.padding = '40px';
+            viewer.innerHTML = '';
+            viewer.appendChild(pagesContainer);
+            
+            const totalPages = pdf.numPages;
+            const scale = 2.0; // モーダルでは大きめに表示
+            
+            // 初期ページを検証
+            let targetPage = parseInt(initialPage);
+            if (targetPage < 1) targetPage = 1;
+            if (targetPage > totalPages) targetPage = totalPages;
+            
+            // 全ページをレンダリング
+            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                try {
+                    const page = await pdf.getPage(pageNum);
+                    const viewport = page.getViewport({ scale: scale });
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'pdf-viewer-canvas';
+                    const context = canvas.getContext('2d');
+                    
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    
+                    const renderContext = {
+                        canvasContext: context,
+                        viewport: viewport
+                    };
+                    
+                    await page.render(renderContext).promise;
+                    
+                    const pageWrapper = document.createElement('div');
+                    pageWrapper.className = 'pdf-page-wrapper';
+                    pageWrapper.id = `${modalId}-page-${pageNum}`;
+                    
+                    const pageNumber = document.createElement('div');
+                    pageNumber.className = 'pdf-page-number';
+                    pageNumber.textContent = `ページ ${pageNum}`;
+                    pageWrapper.appendChild(pageNumber);
+                    
+                    // Canvasコンテナを作成
+                    const canvasContainer = document.createElement('div');
+                    canvasContainer.className = 'pdf-page-canvas-container';
+                    canvasContainer.style.width = viewport.width + 'px';
+                    canvasContainer.style.height = viewport.height + 'px';
+                    
+                    canvasContainer.appendChild(canvas);
+                    
+                    // テキストレイヤーを追加
+                    const textLayer = await createTextLayer(page, viewport);
+                    canvasContainer.appendChild(textLayer);
+                    
+                    pageWrapper.appendChild(canvasContainer);
+                    pagesContainer.appendChild(pageWrapper);
+                } catch (error) {
+                    console.error(`PDFページ ${pageNum} のレンダリングエラー:`, error);
+                }
+            }
+            
+            // 指定されたページまでスクロール
+            setTimeout(() => {
+                const targetElement = document.getElementById(`${modalId}-page-${targetPage}`);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 500);
+        }
+        
+        function closePDFModal(modalId) {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.style.display = 'none';
+                modal.remove();
+            }
+        }
+        
+        function openPDFInNewTab(fileUrl) {
+            // 新しいタブでPDFを開く
+            window.open(fileUrl, '_blank');
+        }
+        
+        function highlightKeywords(text, query) {
+            if (!query || !text) return text;
+            
+            const keywords = query.split(/\s+/).filter(k => k.length > 0);
+            let highlighted = text;
+            
+            keywords.forEach(keyword => {
+                const regex = new RegExp(`(${escapeRegex(keyword)})`, 'gi');
+                highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>');
+            });
+            
+            return highlighted;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function escapeRegex(str) {
+            return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+        
+        function showError(message) {
+            document.getElementById('errorContainer').innerHTML = `
+                <div class="error-message">
+                    <strong>❌ エラー:</strong> ${escapeHtml(message)}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
